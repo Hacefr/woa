@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (GROUND-ANCHORED & AUTO-SCALED)
+// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (GROUNDED STAGE ALIGNMENT)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -56,7 +56,7 @@ class SparrowCharacter {
 
         this.container = new PIXI.Container();
         this.sprite = new PIXI.AnimatedSprite([PIXI.Texture.EMPTY]);
-        this.sprite.anchor.set(0.5, 1.0); // Foot-anchored
+        this.sprite.anchor.set(0.5, 1.0);
         this.container.addChild(this.sprite);
 
         this.animOffsets = {};
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE (GROUNDED FEET ALIGNMENT)
+// 2. DYNAMIC TEXTURE ATLAS ENGINE
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -190,16 +190,13 @@ class DynamicAtlasCharacter {
         this.holdTimer = 0;
         this.fps = 24;
 
-        // Native scale - no horizontal inversion!
         this.container.scale.set(1.0, 1.0);
-
         this.playAnim(this.currentAnim, true);
     }
 
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
         
-        // 1. Timeline Labels mode
         let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -220,7 +217,6 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // 2. Symbol Names mode
         let targetSymbolKey = Object.keys(this.symbolAnims).find(k => k === clean || clean.includes(k));
         if (!targetSymbolKey && animName.includes('idle')) targetSymbolKey = this.isGF ? 'idleleft' : 'idle';
 
@@ -287,19 +283,19 @@ class DynamicAtlasCharacter {
         if (this.mode === 'timeline' && this.activeAnimData) {
             const masterFrame = this.activeAnimData.startFrame + this.frame;
 
-            // Grounding Offsets: lifts character out of floor so feet rest on position.y
-            let groundOffsetX = -150;
-            let groundOffsetY = -620; // Default humanoid height offset
+            // Ground-level calibration: places feet on floor
+            let groundOffsetX = 0;
+            let groundOffsetY = -450; // Standard 500px character anchor
 
-            if (this.isHorse) {
-                groundOffsetX = -220;
-                groundOffsetY = -560;
-            } else if (this.isDetective) {
-                groundOffsetX = -180;
-                groundOffsetY = -650;
+            if (this.isDetective) {
+                groundOffsetX = 0;
+                groundOffsetY = -480;
+            } else if (this.isHorse) {
+                groundOffsetX = 0;
+                groundOffsetY = -400;
             } else if (this.isNoob) {
-                groundOffsetX = -150;
-                groundOffsetY = -600;
+                groundOffsetX = 0;
+                groundOffsetY = -220; // Noob sits low in foreground
             }
 
             for (let l = this.masterLayers.length - 1; l >= 0; l--) {
@@ -343,7 +339,7 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // 2. SYMBOL MODE (Boyfriend & Pico)
+        // 2. SYMBOL MODE (Boyfriend, Pico, Girlfriend)
         if (this.mode === 'symbol' && this.activeSymbolName) {
             const rootMat = new PIXI.Matrix();
             if (this.isPico) {
@@ -485,7 +481,7 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
         }
     }
 
-    // Sparrow Sheet Check
+    // Sparrow Sheet Check (Fallback)
     let pngEntry = null;
     let xmlEntry = null;
 
