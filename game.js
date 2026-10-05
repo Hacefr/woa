@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - OFFICIAL HSCRIPT-ALIGNED CAMERA & STAGE DIRECTOR
+// GAME.JS - DYNAMIC EVENT BUS, SAFE FALLBACKS & GPU VRAM PURGE
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -31,6 +31,7 @@ class PlayStateScene {
         this.gf = gfChar;
 
         this.notes = [];
+        this.events = [];
         this.receptors = [];
         this.score = 0;
         this.combo = 0;
@@ -47,12 +48,10 @@ class PlayStateScene {
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
 
-        // Official HScript Camera Coordinates from security.hxc!
-        // Dad Camera = [500, 450], BF Camera = [850, 450]
-        this.camTargetX = 800;
-        this.camTargetY = 450;
-        this.camFocusX = 800;
-        this.camFocusY = 450;
+        this.camTargetX = 640;
+        this.camTargetY = 360;
+        this.camFocusX = 640;
+        this.camFocusY = 360;
 
         this.setupStage(stageData, stageProps, stageJson);
         this.setupCharacters(stageJson);
@@ -150,25 +149,27 @@ class PlayStateScene {
         this.worldContainer.addChild(this.stageBack);
     }
 
+    // REVISION 3: SAFE POSITION FALLBACKS DRIVEN BY STAGE JSON
     setupCharacters(stageJson) {
         const c = (stageJson && stageJson.characters) ? stageJson.characters : null;
 
+        let dadPos = [100, 100];
+        let bfPos = [770, 450];
+        let gfPos = [400, 130];
+
         if (c) {
-            if (this.dad && c.dad) {
-                this.dad.container.position.set(c.dad.position[0], c.dad.position[1]);
-            }
-            if (this.bf && c.bf) {
-                this.bf.container.position.set(c.bf.position[0], c.bf.position[1]);
-            }
-            if (this.gf) {
-                if (c.gf && c.gf.position) {
-                    this.gf.container.position.set(c.gf.position[0], c.gf.position[1]);
-                    if (c.gf.scale) this.gf.container.scale.set(c.gf.scale);
-                    this.gf.container.visible = true;
-                } else {
-                    this.gf.container.visible = false;
-                }
-            }
+            if (c.dad && Array.isArray(c.dad.position)) dadPos = c.dad.position;
+            if (c.bf && Array.isArray(c.bf.position)) bfPos = c.bf.position;
+            if (c.gf && Array.isArray(c.gf.position)) gfPos = c.gf.position;
+        }
+
+        if (this.dad) this.dad.container.position.set(dadPos[0], dadPos[1]);
+        if (this.bf) this.bf.container.position.set(bfPos[0], bfPos[1]);
+        
+        if (this.gf) {
+            this.gf.container.position.set(gfPos[0], gfPos[1]);
+            if (c && c.gf && c.gf.scale) this.gf.container.scale.set(c.gf.scale);
+            this.gf.container.visible = !!(c && c.gf);
         }
 
         if (this.gf && this.gf.container.visible) this.worldContainer.addChild(this.gf.container);
@@ -177,11 +178,17 @@ class PlayStateScene {
 
         this.worldContainer.addChild(this.stageFront);
 
-        // Security.hxc standard start: camera centers at (800, 450)
-        this.camTargetX = 800;
-        this.camTargetY = 450;
-        this.camFocusX = 800;
-        this.camFocusY = 450;
+        // Stage midpoint initialization
+        const stageMidX = (dadPos[0] + bfPos[0]) / 2;
+        const stageMidY = (dadPos[1] + bfPos[1]) / 2 - 100;
+
+        this.stageCenterX = stageMidX;
+        this.stageCenterY = stageMidY;
+
+        this.camTargetX = stageMidX;
+        this.camTargetY = stageMidY;
+        this.camFocusX = stageMidX;
+        this.camFocusY = stageMidY;
     }
 
     setupStrumlines() {
@@ -213,13 +220,32 @@ class PlayStateScene {
         }
     }
 
+    // REVISION 4: DYNAMIC CHART EVENT BUS PARSER
     parseChartNotes(chart) {
         this.notes = [];
+        this.events = [];
         if (!chart) return;
 
         const data = chart.chartData || chart;
         const songObj = (data.song && typeof data.song === 'object') ? data.song : data;
 
+        // 1. Chart Events
+        if (data.events && Array.isArray(data.events)) {
+            data.events.forEach(evtGroup => {
+                const time = evtGroup[0];
+                const subEvents = evtGroup[1];
+                if (Array.isArray(subEvents)) {
+                    subEvents.forEach(e => {
+                        this.events.push({
+                            time: time, name: e[0], val1: e[1], val2: e[2], fired: false
+                        });
+                    });
+                }
+            });
+            this.events.sort((a, b) => a.time - b.time);
+        }
+
+        // 2. V-Slice Notes
         if (data.notes && typeof data.notes === 'object' && !Array.isArray(data.notes)) {
             const diffNotes = data.notes.normal || data.notes.hard || data.notes.default || Object.values(data.notes)[0];
             if (Array.isArray(diffNotes)) {
@@ -236,6 +262,7 @@ class PlayStateScene {
             }
         }
 
+        // 3. Codename strumLines
         const strumLines = data.strumLines || (data.song && data.song.strumLines);
         if (this.notes.length === 0 && Array.isArray(strumLines)) {
             strumLines.forEach((strum, lineIndex) => {
@@ -254,6 +281,7 @@ class PlayStateScene {
             });
         }
 
+        // 4. Psych sections
         if (this.notes.length === 0) {
             let sections = songObj.notes || data.notes || [];
             if (sections && typeof sections === 'object' && !Array.isArray(sections)) {
@@ -407,6 +435,29 @@ class PlayStateScene {
         this.bfIcon.position.set(splitX + 35, 0);
     }
 
+    // REVISION 4: DYNAMIC EVENT DISPATCHER
+    triggerEvent(name, val1, val2) {
+        switch(name.toLowerCase()) {
+            case 'camera follow pos':
+            case 'set cam position':
+                const x = parseFloat(val1);
+                const y = parseFloat(val2);
+                if (!isNaN(x)) this.camTargetX = x;
+                if (!isNaN(y)) this.camTargetY = y;
+                break;
+                
+            case 'play animation':
+                if (this.dad && val2 === 'dad') this.dad.playAnim(val1, true);
+                if (this.bf && (val2 === 'bf' || val2 === 'boyfriend')) this.bf.playAnim(val1, true);
+                break;
+
+            case 'set zoom':
+                const z = parseFloat(val1);
+                if (!isNaN(z)) this.baseZoom = z;
+                break;
+        }
+    }
+
     update(deltaSec) {
         const songPos = Conductor.songPosition;
         const receptorY = 85;
@@ -415,6 +466,15 @@ class PlayStateScene {
         if (this.dad) this.dad.update(deltaSec);
         if (this.bf) this.bf.update(deltaSec);
         if (this.gf && this.gf.container.visible) this.gf.update(deltaSec);
+
+        // REVISION 4: Process Chart Events
+        for (let i = 0; i < this.events.length; i++) {
+            const e = this.events[i];
+            if (!e.fired && songPos >= e.time) {
+                e.fired = true;
+                this.triggerEvent(e.name, e.val1, e.val2);
+            }
+        }
 
         // Icon bounce lerp
         this.dadIcon.scale.x += (1.0 - this.dadIcon.scale.x) * 0.15;
@@ -442,7 +502,7 @@ class PlayStateScene {
 
             const diff = n.time - songPos;
 
-            // Opponent Turn Camera Switch: Uses LegacyUtils.camSpecialThing([500, 450])
+            // Opponent note hit: gentle camera nudge
             if (!n.isPlayer && diff <= 0) {
                 n.hit = true;
                 n.sprite.visible = false;
@@ -452,8 +512,8 @@ class PlayStateScene {
                 const anims = ['left', 'down', 'up', 'right'];
                 if (this.dad) {
                     this.dad.playAnim(anims[n.dir], true);
-                    this.camTargetX = 500;
-                    this.camTargetY = 450;
+                    this.camTargetX = this.stageCenterX - 80;
+                    this.camTargetY = this.stageCenterY;
                 }
                 continue;
             }
@@ -517,9 +577,8 @@ class PlayStateScene {
         const anims = ['left', 'down', 'up', 'right'];
         if (this.bf) {
             this.bf.playAnim(anims[dir], true);
-            // Player Turn Camera Switch: Uses LegacyUtils.camSpecialThing([850, 450])
-            this.camTargetX = 850;
-            this.camTargetY = 450;
+            this.camTargetX = this.stageCenterX + 80;
+            this.camTargetY = this.stageCenterY;
         }
 
         let closest = null;
@@ -572,22 +631,25 @@ class PlayStateScene {
         this.scoreText.text = `Score: ${this.score} | Misses: ${this.misses} | Accuracy: ${acc}%`;
     }
 
+    // REVISION 3: GPU VRAM MEMORY CLEANUP
     destroy() {
         app.stage.removeChild(this.worldContainer);
         app.stage.removeChild(this.hudContainer);
-        this.worldContainer.destroy({ children: true });
+
+        // Purges underlying WebGL baseTextures from GPU to prevent tab crashes
+        this.worldContainer.destroy({ children: true, texture: true, baseTexture: true });
         this.hudContainer.destroy({ children: true });
     }
 }
 
 // ============================================================================
-// SCRIPTED MOMENTS (TRANSLATED DIRECTLY FROM SECURITY.HXC & SECURITY2.HXC)
+// SCRIPTED MOMENTS & BEAT HIT CALLBACKS
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // 1. Script Director for "49" (security.hxc)
+    // 1. "49" Stage Event (security.hxc Step 993)
     if (currentSong.includes('49')) {
         if (step === 993) {
             if (playState.animatedProps['graypet']) playState.animatedProps['graypet'].alpha = 0.001;
@@ -598,7 +660,7 @@ function onStepHit(step) {
         }
     }
 
-    // 2. Script Director for "Suspect" (security2.hxc)
+    // 2. "Suspect" Cutscene Events (security2.hxc)
     if (currentSong.includes('suspect')) {
         if (step === 60 && playState.discussSprite) {
             playState.discussSprite.alpha = 1;
@@ -633,7 +695,7 @@ function onBeatHit(beat) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // security.hxc beat animations!
+    // 49 Stage Prop Bopping from security.hxc
     if (currentSong.includes('49')) {
         if (beat % 2 === 0 && playState.animatedProps['shit']) {
             playState.animatedProps['shit'].gotoAndPlay(0);
