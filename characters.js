@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - DUAL-ENGINE: DYNAMIC ADOBE FLXANIMATE ATLAS + SPARROW XML
+// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (MASTER TIMELINE ATLAS + SPARROW)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -46,7 +46,7 @@ function parseSparrowAtlas(baseTexture, xmlDoc) {
 }
 
 // ----------------------------------------------------------------------------
-// 1. SPARROW CHARACTER RUNTIME (DETECTIVE & CLASSIC CHARACTERS)
+// 1. SPARROW CHARACTER RUNTIME
 // ----------------------------------------------------------------------------
 class SparrowCharacter {
     constructor(baseTexture, anims, charConfig = {}, isPlayer = false) {
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS CHARACTER (ADOBE ANIMATE / FLXANIMATE RUNTIME)
+// 2. DYNAMIC TEXTURE ATLAS ENGINE (SUPPORTS TIMELINE LABELS + SYMBOL MODES)
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -125,12 +125,14 @@ class DynamicAtlasCharacter {
         this.displayContainer = new PIXI.Container();
         this.container.addChild(this.displayContainer);
 
+        // 1. Spritemap Lookup
         this.spritemap = {};
         for (const item of spritemapJson.ATLAS.SPRITES) {
             const s = item.SPRITE;
             this.spritemap[s.name] = new PIXI.Texture(baseTexture, new PIXI.Rectangle(s.x, s.y, s.w, s.h));
         }
 
+        // 2. Symbols Library
         this.symbols = {};
         if (animJson.SD && animJson.SD.S) {
             for (const s of animJson.SD.S) {
@@ -138,110 +140,122 @@ class DynamicAtlasCharacter {
             }
         }
 
+        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels (Detective / Horsemate style)
+        this.timelineAnims = {};
+        this.masterLayers = (animJson.AN && animJson.AN.TL && animJson.AN.TL.L) ? animJson.AN.TL.L : [];
+
+        for (const layer of this.masterLayers) {
+            for (const fr of layer.FR || []) {
+                if (fr.N) {
+                    const label = fr.N.toLowerCase().trim();
+                    this.timelineAnims[label] = {
+                        startFrame: fr.I,
+                        duration: fr.DU || 1
+                    };
+                }
+            }
+        }
+
+        // 4. Scan Symbols for Direct Animation Names (Boyfriend / Pico style)
+        this.symbolAnims = {};
         const rootMatrices = {};
-        if (animJson.AN && animJson.AN.TL && animJson.AN.TL.L) {
-            for (const layer of animJson.AN.TL.L) {
-                for (const fr of layer.FR || []) {
-                    for (const el of fr.E || []) {
-                        if (el.SI && el.SI.SN) {
-                            rootMatrices[el.SI.SN] = extractMatrix(el.SI);
-                        }
+        for (const layer of this.masterLayers) {
+            for (const fr of layer.FR || []) {
+                for (const el of fr.E || []) {
+                    if (el.SI && el.SI.SN) {
+                        rootMatrices[el.SI.SN] = extractMatrix(el.SI);
                     }
                 }
             }
         }
 
-        this.animMap = {};
-        this.animMatrices = {};
-        
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
-            const isCopyOrAlt = lower.includes('copy') || lower.includes('alt') || lower.includes('shift') || lower.includes('dark');
-
-            const assignAnim = (key) => {
-                this.animMap[key] = symName;
-                this.animMatrices[key] = rootMatrices[symName] || new PIXI.Matrix();
+            const assign = (key) => {
+                this.symbolAnims[key] = symName;
             };
 
             if (this.isGF) {
-                if (lower.includes('idle1') || lower.includes('idleleft')) assignAnim('idleleft');
-                if (lower.includes('idle2') || lower.includes('idleright')) assignAnim('idleright');
-                if (lower.includes('cheer')) assignAnim('cheer');
-                if (lower.includes('sad')) assignAnim('sad');
+                if (lower.includes('idle1') || lower.includes('idleleft')) assign('idleleft');
+                if (lower.includes('idle2') || lower.includes('idleright')) assign('idleright');
             } else {
-                if (lower.includes('idle') && !isCopyOrAlt && !this.animMap['idle']) assignAnim('idle');
-                else if (lower.includes('left') && !lower.includes('miss') && !isCopyOrAlt && !this.animMap['left']) {
-                    assignAnim('left'); assignAnim('singleft');
-                }
-                else if (lower.includes('down') && !lower.includes('miss') && !isCopyOrAlt && !this.animMap['down']) {
-                    assignAnim('down'); assignAnim('singdown');
-                }
-                else if (lower.includes('up') && !lower.includes('miss') && !isCopyOrAlt && !this.animMap['up']) {
-                    assignAnim('up'); assignAnim('singup');
-                }
-                else if (lower.includes('right') && !lower.includes('miss') && !isCopyOrAlt && !this.animMap['right']) {
-                    assignAnim('right'); assignAnim('singright');
-                }
+                if (lower.includes('idle') && !this.symbolAnims['idle']) assign('idle');
+                if (lower.includes('left') && !lower.includes('miss') && !this.symbolAnims['left']) { assign('left'); assign('singleft'); }
+                if (lower.includes('down') && !lower.includes('miss') && !this.symbolAnims['down']) { assign('down'); assign('singdown'); }
+                if (lower.includes('up') && !lower.includes('miss') && !this.symbolAnims['up']) { assign('up'); assign('singup'); }
+                if (lower.includes('right') && !lower.includes('miss') && !this.symbolAnims['right']) { assign('right'); assign('singright'); }
 
-                if (lower.includes('lock in')) assignAnim('lock in');
-                if (lower.includes('cock')) assignAnim('cock');
-                if (lower.includes('blast')) assignAnim('blast');
-
-                if (lower.includes('miss')) {
-                    if (lower.includes('left')) assignAnim('singleftmiss');
-                    if (lower.includes('down')) assignAnim('singdownmiss');
-                    if (lower.includes('up')) assignAnim('singupmiss');
-                    if (lower.includes('right')) assignAnim('singrightmiss');
-                }
+                if (lower.includes('lock in')) assign('lock in');
+                if (lower.includes('cock')) assign('cock');
+                if (lower.includes('blast')) assign('blast');
             }
         }
 
+        // Determine Primary Mode
+        this.hasTimelineLabels = Object.keys(this.timelineAnims).length > 0;
         this.currentAnim = this.isGF ? 'idleleft' : 'idle';
         this.frame = 0;
         this.frameTimer = 0;
         this.holdTimer = 0;
         this.fps = 24;
 
-        // V-Slice native scale
+        // V-Slice native scale & facing direction
         const scale = 1.0;
         this.container.scale.set(this.isPlayer ? scale : (this.isGF ? scale : -scale), scale);
 
-        this.renderCurrentFrame();
+        this.playAnim(this.currentAnim, true);
     }
 
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        let targetKey = Object.keys(this.animMap).find(k => k === clean || clean.includes(k));
+        
+        // Check Timeline Labels first
+        let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
+            const kc = k.replace(/[^a-z0-9]/g, '');
+            return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
+        });
 
-        if (!targetKey && animName.includes('idle')) targetKey = this.isGF ? 'idleleft' : 'idle';
-        if (!targetKey) targetKey = this.isGF ? 'idleleft' : 'idle';
+        if (!targetTimelineKey && animName.includes('idle')) {
+            targetTimelineKey = Object.keys(this.timelineAnims).find(k => k.includes('idle'));
+        }
 
-        if (this.animMap[targetKey]) {
-            this.currentAnim = targetKey;
+        if (targetTimelineKey) {
+            this.mode = 'timeline';
+            this.currentAnim = targetTimelineKey;
+            this.activeAnimData = this.timelineAnims[targetTimelineKey];
             this.frame = 0;
             this.frameTimer = 0;
-            if (!targetKey.includes('idle')) {
-                this.holdTimer = 0.35;
-            }
+            if (!targetTimelineKey.includes('idle')) this.holdTimer = 0.35;
+            this.renderCurrentFrame();
+            return;
+        }
+
+        // Check Symbol Names mode
+        let targetSymbolKey = Object.keys(this.symbolAnims).find(k => k === clean || clean.includes(k));
+        if (!targetSymbolKey && animName.includes('idle')) targetSymbolKey = this.isGF ? 'idleleft' : 'idle';
+
+        if (targetSymbolKey && this.symbolAnims[targetSymbolKey]) {
+            this.mode = 'symbol';
+            this.currentAnim = targetSymbolKey;
+            this.activeSymbolName = this.symbolAnims[targetSymbolKey];
+            this.frame = 0;
+            this.frameTimer = 0;
+            if (!targetSymbolKey.includes('idle')) this.holdTimer = 0.35;
             this.renderCurrentFrame();
         }
     }
 
     renderCurrentFrame() {
-        const symName = this.animMap[this.currentAnim];
-        const sym = this.symbols[symName];
-        if (!sym) return;
-
         this.displayContainer.removeChildren();
-
         const self = this;
-        function renderSymbol(name, frameNum, parentMat, target) {
-            const currentSym = self.symbols[name];
-            if (!currentSym || !currentSym.TL || !currentSym.TL.L) return;
 
-            // Flash Layer Stacking Rule: Reverse traversal draws back layers first
-            for (let l = currentSym.TL.L.length - 1; l >= 0; l--) {
-                const layer = currentSym.TL.L[l];
+        function renderSymbolInstance(symName, frameNum, parentMat, target) {
+            const sym = self.symbols[symName];
+            if (!sym || !sym.TL || !sym.TL.L) return;
+
+            // Reverse layer traversal draws background limbs behind foreground
+            for (let l = sym.TL.L.length - 1; l >= 0; l--) {
+                const layer = sym.TL.L[l];
                 if (!layer.FR || layer.FR.length === 0) continue;
 
                 let activeFR = null;
@@ -272,30 +286,73 @@ class DynamicAtlasCharacter {
                         } else {
                             subFrame = (frameNum - activeFR.I + (el.SI.FF || 0));
                         }
-
                         const localMat = extractMatrix(el.SI);
                         const finalMat = parentMat.clone().append(localMat);
-                        renderSymbol(el.SI.SN, subFrame, finalMat, target);
+                        renderSymbolInstance(el.SI.SN, subFrame, finalMat, target);
                     }
                 }
             }
         }
 
-        const animMatrix = this.animMatrices[this.currentAnim] || new PIXI.Matrix();
-        const rootMat = animMatrix.clone();
-        
-        // Exact root counter-offsets for Flash canvas alignment
-        if (this.isPico) {
-            rootMat.translate(116, -180);
-        } else if (this.isPlayer) {
-            rootMat.translate(-405, -280);
-        } else if (this.isGF) {
-            rootMat.translate(-350, -320);
-        } else {
-            rootMat.translate(-200, -320);
+        // 1. TIMELINE MODE (Detective & Horsemate)
+        if (this.mode === 'timeline' && this.activeAnimData) {
+            const masterFrame = this.activeAnimData.startFrame + this.frame;
+
+            for (let l = this.masterLayers.length - 1; l >= 0; l--) {
+                const layer = this.masterLayers[l];
+                if (!layer.FR) continue;
+
+                let activeFR = null;
+                for (const fr of layer.FR) {
+                    if (masterFrame >= fr.I && masterFrame < fr.I + fr.DU) {
+                        activeFR = fr;
+                        break;
+                    }
+                }
+
+                if (!activeFR || !activeFR.E) continue;
+
+                for (const el of activeFR.E) {
+                    const baseMat = new PIXI.Matrix();
+                    baseMat.translate(-200, -320); // Center on feet
+
+                    if (el.ASI) {
+                        const tex = this.spritemap[el.ASI.N];
+                        if (tex) {
+                            const spr = new PIXI.Sprite(tex);
+                            spr.transform.setFromMatrix(baseMat.append(extractMatrix(el.ASI)));
+                            this.displayContainer.addChild(spr);
+                        }
+                    } else if (el.SI) {
+                        let subFrame = 0;
+                        if (el.SI.LP === "SF") {
+                            subFrame = el.SI.FF || 0;
+                        } else {
+                            subFrame = (masterFrame - activeFR.I + (el.SI.FF || 0));
+                        }
+                        const localMat = extractMatrix(el.SI);
+                        const finalMat = baseMat.clone().append(localMat);
+                        renderSymbolInstance(el.SI.SN, subFrame, finalMat, this.displayContainer);
+                    }
+                }
+            }
+            return;
         }
 
-        renderSymbol(symName, this.frame, rootMat, this.displayContainer);
+        // 2. SYMBOL MODE (Boyfriend & Pico)
+        if (this.mode === 'symbol' && this.activeSymbolName) {
+            const rootMat = new PIXI.Matrix();
+            if (this.isPico) {
+                rootMat.translate(116, -180);
+            } else if (this.isPlayer) {
+                rootMat.translate(-405, -280);
+            } else if (this.isGF) {
+                rootMat.translate(-350, -320);
+            } else {
+                rootMat.translate(-200, -320);
+            }
+            renderSymbolInstance(this.activeSymbolName, this.frame, rootMat, this.displayContainer);
+        }
     }
 
     update(deltaSec) {
@@ -311,18 +368,22 @@ class DynamicAtlasCharacter {
             this.frameTimer = 0;
             this.frame++;
 
-            const symName = this.animMap[this.currentAnim];
-            const sym = this.symbols[symName];
-            if (sym) {
-                let maxFrames = 1;
-                for (const layer of sym.TL.L || []) {
-                    for (const fr of layer.FR || []) {
-                        maxFrames = Math.max(maxFrames, fr.I + fr.DU);
-                    }
+            if (this.mode === 'timeline' && this.activeAnimData) {
+                if (this.frame >= this.activeAnimData.duration) {
+                    this.frame = (this.currentAnim.includes('idle')) ? 0 : this.activeAnimData.duration - 1;
                 }
-
-                if (this.frame >= maxFrames) {
-                    this.frame = (this.currentAnim.includes('idle')) ? 0 : maxFrames - 1;
+            } else if (this.mode === 'symbol' && this.activeSymbolName) {
+                const sym = this.symbols[this.activeSymbolName];
+                if (sym) {
+                    let maxFrames = 1;
+                    for (const layer of sym.TL.L || []) {
+                        for (const fr of layer.FR || []) {
+                            maxFrames = Math.max(maxFrames, fr.I + fr.DU);
+                        }
+                    }
+                    if (this.frame >= maxFrames) {
+                        this.frame = (this.currentAnim.includes('idle')) ? 0 : maxFrames - 1;
+                    }
                 }
             }
 
@@ -363,7 +424,7 @@ function createFallbackCharacter(colorHex, isPlayer) {
 }
 
 // ----------------------------------------------------------------------------
-// 4. UNIVERSAL CHARACTER LOADER (VERIFIED DIRECTORY PATH ENGINE)
+// 4. UNIVERSAL CHARACTER LOADER
 // ----------------------------------------------------------------------------
 async function loadCharacter(charName, isPlayer, isGF = false) {
     const clean = charName.toLowerCase().trim();
@@ -372,7 +433,6 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
     let spritemapJsonEntry = null;
     let spritemapPngEntry = null;
 
-    // Scan for FlxAnimate Texture Atlas with literal folder hierarchies
     for (const [path, entry] of Object.entries(VirtualFS.assets)) {
         let isMatch = false;
 
@@ -385,7 +445,6 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
                 isMatch = path.includes('characters/bf/cosmicube/') || path.includes('/bf/');
             }
         } else {
-            // Opponents live in dlc/ or triple/ or base characters/
             isMatch = path.includes(`characters/dlc/${clean}/`) || 
                       path.includes(`characters/triple/${clean}/`) || 
                       path.includes(`characters/triple/maroon/${clean}/`) ||
@@ -422,14 +481,14 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
         }
     }
 
-    // Sparrow Sheet Check (e.g. Detective, Base characters)
+    // Sparrow Sheet Check
     let pngEntry = null;
     let xmlEntry = null;
 
     for (const [path, entry] of Object.entries(VirtualFS.assets)) {
         if (!path.includes('/dialogue/') && !path.includes('/cutscene/')) {
-            if (path.endsWith(`${clean}.png`) || path.includes(`characters/dlc/${clean}/${clean}.png`)) pngEntry = entry;
-            if (path.endsWith(`${clean}.xml`) || path.includes(`characters/dlc/${clean}/${clean}.xml`)) xmlEntry = entry;
+            if (path.endsWith(`${clean}.png`)) pngEntry = entry;
+            if (path.endsWith(`${clean}.xml`)) xmlEntry = entry;
         }
     }
 
