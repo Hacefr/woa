@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (NO-TELEPORT MATRIX SYNCHRONIZATION)
+// CHARACTERS.JS - REFACTORED DATA-DRIVEN DUAL ENGINE (ATLAS + SPARROW)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -46,7 +46,7 @@ function parseSparrowAtlas(baseTexture, xmlDoc) {
 }
 
 // ----------------------------------------------------------------------------
-// 1. SPARROW CHARACTER RUNTIME
+// 1. SPARROW CHARACTER RUNTIME (REVISION 2: ANCHOR AT 0, 0)
 // ----------------------------------------------------------------------------
 class SparrowCharacter {
     constructor(baseTexture, anims, charConfig = {}, isPlayer = false) {
@@ -56,7 +56,9 @@ class SparrowCharacter {
 
         this.container = new PIXI.Container();
         this.sprite = new PIXI.AnimatedSprite([PIXI.Texture.EMPTY]);
-        this.sprite.anchor.set(0.5, 1.0);
+        
+        // REVISION 2 FIX: FNF frame offsets operate strictly relative to top-left (0, 0)
+        this.sprite.anchor.set(0, 0);
         this.container.addChild(this.sprite);
 
         this.animOffsets = {};
@@ -112,15 +114,15 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE (ACCURATE MATRIX PRESERVATION)
+// 2. DYNAMIC TEXTURE ATLAS ENGINE (REVISION 1: FULLY DATA-DRIVEN OFFSETS)
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
-    constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
+    constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false, globalOffset = [0, 0]) {
         this.charName = charName.toLowerCase();
         this.isPlayer = isPlayer;
         this.isGF = isGF;
-        this.isPico = this.charName.includes('pico');
-        
+        this.globalOffset = globalOffset; // [x, y] derived strictly from char JSON + .hxc
+
         this.container = new PIXI.Container();
         this.displayContainer = new PIXI.Container();
         this.container.addChild(this.displayContainer);
@@ -162,11 +164,10 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 4. Map Character Animations to Flash Symbols & Store Their Exact Root Matrices
+        // 4. Map Character Animations to Flash Symbols & Store Root Matrices
         this.animMap = {};
         this.animMatrices = {};
 
-        // Also check character JSON if provided
         const charConfig = VirtualFS.charJsons[this.charName] || {};
 
         if (charConfig.animations) {
@@ -180,7 +181,6 @@ class DynamicAtlasCharacter {
             });
         }
 
-        // Fallback symbol scanning for standard names
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
             const assign = (key) => {
@@ -220,14 +220,15 @@ class DynamicAtlasCharacter {
         this.holdTimer = 0;
         this.fps = 24;
 
-        this.container.scale.set(1.0, 1.0);
+        const charScale = charConfig.scale || 1.0;
+        this.container.scale.set(charConfig.flipX ? -charScale : charScale, charScale);
+
         this.playAnim(this.currentAnim, true);
     }
 
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        // 1. Timeline Labels Mode (Detective, Horsemate)
         let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -248,7 +249,6 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // 2. Symbol Names Mode (Boyfriend, Pico, Girlfriend)
         let targetKey = Object.keys(this.animMap).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -335,6 +335,7 @@ class DynamicAtlasCharacter {
 
                 for (const el of activeFR.E) {
                     const baseMat = new PIXI.Matrix();
+                    baseMat.translate(this.globalOffset[0] || 0, this.globalOffset[1] || 0);
 
                     if (el.ASI) {
                         const tex = this.spritemap[el.ASI.N];
@@ -359,21 +360,14 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // 2. SYMBOL MODE (Boyfriend, Pico, Girlfriend)
-        // Uses the exact matrix exported by Flash for each animation to prevent teleportation!
+        // 2. SYMBOL MODE (REVISION 1 FIX: Fully data-driven, zero arbitrary hardcoded translates)
         if (this.mode === 'symbol' && this.activeSymbolName) {
             const animMat = this.animMatrices[this.currentAnim] || this.rootMatrices[this.activeSymbolName] || new PIXI.Matrix();
             const rootMat = animMat.clone();
 
-            if (this.isPico) {
-                rootMat.translate(116, -180);
-            } else if (this.isPlayer) {
-                rootMat.translate(-405, -280);
-            } else if (this.isGF) {
-                rootMat.translate(-350, -320);
-            } else {
-                rootMat.translate(-200, -320);
-            }
+            // Strictly applies data-driven global offsets extracted from charConfig + .hxc
+            rootMat.translate(this.globalOffset[0] || 0, this.globalOffset[1] || 0);
+
             renderSymbolInstance(this.activeSymbolName, this.frame, rootMat, this.displayContainer);
         }
     }
@@ -447,11 +441,47 @@ function createFallbackCharacter(colorHex, isPlayer) {
 }
 
 // ----------------------------------------------------------------------------
-// 4. UNIVERSAL CHARACTER LOADER
+// 4. UNIVERSAL CHARACTER LOADER (REVISION 1: .HXC + JSON REGEX POSITION PARSER)
 // ----------------------------------------------------------------------------
 async function loadCharacter(charName, isPlayer, isGF = false) {
     const clean = charName.toLowerCase().trim();
 
+    // 1. Resolve character configuration JSON if indexed
+    const charConfig = VirtualFS.charJsons[clean] || {};
+    let globalX = 0;
+    let globalY = 0;
+
+    if (Array.isArray(charConfig.position) && charConfig.position.length >= 2) {
+        globalX += charConfig.position[0];
+        globalY += charConfig.position[1];
+    } else if (Array.isArray(charConfig.offsets) && charConfig.offsets.length >= 2) {
+        globalX += charConfig.offsets[0];
+        globalY += charConfig.offsets[1];
+    }
+
+    // 2. Scan VirtualFS for corresponding .hxc companion script to extract manual offsets
+    const hxcKey = Object.keys(VirtualFS.assets).find(p => 
+        (p.includes(`/characters/${clean}/`) || p.includes(`/${clean}/`) || p.endsWith(`/${clean}.hxc`)) && p.endsWith('.hxc')
+    );
+
+    if (hxcKey) {
+        try {
+            const hxcText = await VirtualFS.assets[hxcKey].async('string');
+            const arrayMatch = hxcText.match(/(?:position\s*[:=]\s*\[|setPosition\()\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i);
+            const xMatch = hxcText.match(/(?:sprite\.)?x\s*=\s*(-?\d+(?:\.\d+)?)/i);
+            const yMatch = hxcText.match(/(?:sprite\.)?y\s*=\s*(-?\d+(?:\.\d+)?)/i);
+
+            if (arrayMatch) {
+                globalX += parseFloat(arrayMatch[1]);
+                globalY += parseFloat(arrayMatch[2]);
+            } else {
+                if (xMatch) globalX += parseFloat(xMatch[1]);
+                if (yMatch) globalY += parseFloat(yMatch[2]);
+            }
+        } catch (e) {}
+    }
+
+    // 3. Scan for FlxAnimate Texture Atlas
     let animJsonEntry = null;
     let spritemapJsonEntry = null;
     let spritemapPngEntry = null;
@@ -496,11 +526,42 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
             await new Promise(res => img.onload = res);
 
             const baseTexture = new PIXI.BaseTexture(img);
-            console.log(`%c[TEXTURE ATLAS LOADED] ${charName.toUpperCase()}`, "color: #00d2d3; font-weight: bold;");
+            console.log(`%c[TEXTURE ATLAS LOADED] ${charName.toUpperCase()} with offset [${globalX}, ${globalY}]`, "color: #00d2d3; font-weight: bold;");
             
-            return new DynamicAtlasCharacter(baseTexture, animJson, spritemapJson, charName, isPlayer, isGF);
+            return new DynamicAtlasCharacter(baseTexture, animJson, spritemapJson, charName, isPlayer, isGF, [globalX, globalY]);
         } catch(err) {
             console.warn(`Failed loading Texture Atlas for ${charName}:`, err);
+        }
+    }
+
+    // 4. Sparrow Sheet Check (Fallback)
+    let pngEntry = null;
+    let xmlEntry = null;
+
+    for (const [path, entry] of Object.entries(VirtualFS.assets)) {
+        if (!path.includes('/dialogue/') && !path.includes('/cutscene/')) {
+            if (path.endsWith(`${clean}.png`) || path.includes(`characters/dlc/${clean}/${clean}.png`)) pngEntry = entry;
+            if (path.endsWith(`${clean}.xml`) || path.includes(`characters/dlc/${clean}/${clean}.xml`)) xmlEntry = entry;
+        }
+    }
+
+    if (pngEntry && xmlEntry) {
+        try {
+            const pngBlob = await pngEntry.async('blob');
+            const xmlText = (await xmlEntry.async('string')).replace(/^\uFEFF/, '').trim();
+
+            const img = new Image();
+            img.src = URL.createObjectURL(pngBlob);
+            await new Promise(res => img.onload = res);
+
+            const baseTexture = new PIXI.BaseTexture(img);
+            const xmlDoc = new DOMParser().parseFromString(xmlText, 'text/xml');
+            const anims = parseSparrowAtlas(baseTexture, xmlDoc);
+
+            console.log(`%c[SPARROW SHEET LOADED] ${charName.toUpperCase()}`, "color: #2ed573; font-weight: bold;");
+            return new SparrowCharacter(baseTexture, anims, charConfig, isPlayer);
+        } catch(e) {
+            console.error(`Failed to build Sparrow Character for ${charName}:`, e);
         }
     }
 
