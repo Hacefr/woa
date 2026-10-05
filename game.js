@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - STAGE CENTERED CAMERA (DAD, GF & BF IN VIEW)
+// GAME.JS - TRUE 1080P ROOM FRAMING (GROUNDS ROOM & STABILIZES CAMERA)
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -43,6 +43,7 @@ class PlayStateScene {
         this.animatedProps = [];
         this.discussSprite = null;
 
+        // V-Slice Camera Zoom
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
 
@@ -73,7 +74,7 @@ class PlayStateScene {
                     g.drawRect(-3000, -3000, 8000, 8000);
                     g.endFill();
                     
-                    g.alpha = 0; // Cutscene tints start hidden
+                    g.alpha = 0;
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
@@ -171,11 +172,11 @@ class PlayStateScene {
 
         this.worldContainer.addChild(this.stageFront);
 
-        // BALANCED STAGE MIDPOINT: Focuses squarely on the stage center
+        // TRUE ROOM CENTER: Y = 460 brings the entire room down to the floor
         const dadX = this.dad ? this.dad.container.position.x : 300;
         const bfX = this.bf ? this.bf.container.position.x : 1000;
         const stageMidX = (dadX + bfX) / 2;
-        const stageMidY = this.gf ? (this.gf.container.position.y - 40) : 500;
+        const stageMidY = 460; // Natural 1080p vertical center
 
         this.stageCenterX = stageMidX;
         this.stageCenterY = stageMidY;
@@ -519,7 +520,6 @@ class PlayStateScene {
         const anims = ['left', 'down', 'up', 'right'];
         if (this.bf) {
             this.bf.playAnim(anims[dir], true);
-            // Player singing: gentle 80px shift to the right
             this.camTargetX = this.stageCenterX + 80;
             this.camTargetY = this.stageCenterY;
         }
