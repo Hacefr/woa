@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - PLAYSTATE SCENE, V-SLICE CAMERA ENGINE, PROPS & SCRIPT DIRECTORS
+// GAME.JS - PLAYSTATE SCENE, V-SLICE CAMERA FOCUS (MIDPOINT), PROPS & SCRIPTS
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -72,14 +72,18 @@ class PlayStateScene {
                 const cleanName = p.assetPath.split('/').pop().toLowerCase();
                 const tex = stageData[cleanName];
 
-                // 1. Hex Color Overlays (#000000, #FF0000)
+                // 1. Color Overlays (#000000, #FF0000)
                 if (p.assetPath && p.assetPath.startsWith('#')) {
+                    // loBlack / transition overlays start transparent (alpha = 0) so they don't cover the screen!
+                    const isBlackTransition = (p.assetPath === '#000000' || p.name.toLowerCase().includes('black'));
                     const hexColor = parseInt(p.assetPath.replace('#', '0x'), 16) || 0x000000;
+                    
                     const g = new PIXI.Graphics();
                     g.beginFill(hexColor);
-                    g.drawRect(-2000, -2000, 6000, 6000);
+                    g.drawRect(-3000, -3000, 8000, 8000);
                     g.endFill();
-                    g.alpha = (p.alpha !== undefined) ? p.alpha : 1;
+                    
+                    g.alpha = isBlackTransition ? 0 : ((p.alpha !== undefined) ? p.alpha : 1);
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
@@ -90,7 +94,7 @@ class PlayStateScene {
                     return;
                 }
 
-                // 2. Animated XML Props (horses, caughthorse, boppers, tawny, player)
+                // 2. Animated XML Props
                 if (stageProps[cleanName]) {
                     const animTextures = Object.values(stageProps[cleanName])[0];
                     const aSpr = new PIXI.AnimatedSprite(animTextures);
@@ -98,7 +102,7 @@ class PlayStateScene {
                     aSpr.scale.set(p.scale || 1);
                     aSpr.zIndex = p.zIndex || 0;
 
-                    // FIX: Respect p.alpha on animated props! (Hides caughthorse/playerguy until triggered)
+                    // Respect p.alpha so caughthorse / playerguy stay hidden until triggered
                     aSpr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     aSpr.loop = false;
 
@@ -177,10 +181,10 @@ class PlayStateScene {
 
         this.worldContainer.addChild(this.stageFront);
 
-        // Center on Opponent to start
+        // Center camera on character's chest/midpoint (Y - 350)
         const dadCam = (this.dad && this.dad.cameraOffsets) ? this.dad.cameraOffsets : [150, -100];
         this.camTargetX = this.dad.container.position.x + dadCam[0];
-        this.camTargetY = this.dad.container.position.y + dadCam[1];
+        this.camTargetY = this.dad.container.position.y - 350 + dadCam[1];
         this.camFocusX = this.camTargetX;
         this.camFocusY = this.camTargetY;
     }
@@ -221,7 +225,7 @@ class PlayStateScene {
         const data = chart.chartData || chart;
         const songObj = (data.song && typeof data.song === 'object') ? data.song : data;
 
-        // V-Slice Notes Object
+        // V-Slice Notes
         if (data.notes && typeof data.notes === 'object' && !Array.isArray(data.notes)) {
             const diffNotes = data.notes.normal || data.notes.hard || data.notes.default || Object.values(data.notes)[0];
             if (Array.isArray(diffNotes)) {
@@ -426,7 +430,7 @@ class PlayStateScene {
         this.bfIcon.scale.x += (1.0 - this.bfIcon.scale.x) * 0.15;
         this.bfIcon.scale.y += (1.0 - this.bfIcon.scale.y) * 0.15;
 
-        // V-SLICE TRUE CAMERA LERP (Centers target on screen)
+        // V-SLICE TRUE CAMERA LERP (Centers on midpoint, fills screen with stage)
         this.camFocusX += (this.camTargetX - this.camFocusX) * 0.05;
         this.camFocusY += (this.camTargetY - this.camFocusY) * 0.05;
         this.camZoom += (this.baseZoom - this.camZoom) * 0.08;
@@ -458,7 +462,7 @@ class PlayStateScene {
                     this.dad.playAnim(anims[n.dir], true);
                     const dadCam = this.dad.cameraOffsets || [150, -100];
                     this.camTargetX = this.dad.container.position.x + dadCam[0];
-                    this.camTargetY = this.dad.container.position.y + dadCam[1];
+                    this.camTargetY = this.dad.container.position.y - 350 + dadCam[1];
                 }
                 continue;
             }
@@ -524,7 +528,7 @@ class PlayStateScene {
             this.bf.playAnim(anims[dir], true);
             const bfCam = this.bf.cameraOffsets || [-100, -100];
             this.camTargetX = this.bf.container.position.x + bfCam[0];
-            this.camTargetY = this.bf.container.position.y + bfCam[1];
+            this.camTargetY = this.bf.container.position.y - 350 + bfCam[1];
         }
 
         let closest = null;
@@ -586,7 +590,7 @@ class PlayStateScene {
 }
 
 // ============================================================================
-// SCRIPTED MOMENTS (SECURITY2.HXC, TROT AWAY & BEAT CALLBACKS)
+// SCRIPTED MOMENTS
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
@@ -627,7 +631,6 @@ function onBeatHit(beat) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // Gallop rhythm camera pulse for Trot Away
     if (currentSong.includes('trot')) {
         playState.camZoom = playState.baseZoom + (beat % 2 === 0 ? 0.04 : 0.015);
     } else {
@@ -637,13 +640,11 @@ function onBeatHit(beat) {
     if (playState.dadIcon) playState.dadIcon.scale.set(1.25);
     if (playState.bfIcon) playState.bfIcon.scale.set(1.25);
 
-    // Girlfriend dancing
     if (playState.gf && playState.gf.container.visible) {
         playState.gfDanceLeft = !playState.gfDanceLeft;
         playState.gf.playAnim(playState.gfDanceLeft ? 'idleleft' : 'idleright', true);
     }
 
-    // Dynamic bop for all detected animated props
     playState.animatedProps.forEach(prop => {
         if (beat % prop.bopInterval === 0) {
             prop.sprite.gotoAndPlay(0);
@@ -740,7 +741,6 @@ async function launchSong(item) {
 
     const audioToLoad = [];
 
-    // Scan for audio stems
     for (const [path, entry] of Object.entries(VirtualFS.assets)) {
         const cleanPath = path.replace(/[^a-z0-9\/\.]/g, '');
         if (cleanPath.includes(`/${cleanId}/`) || cleanPath.includes(`songs/${cleanId}`) || cleanPath.includes(`/${cleanId}-inst`) || cleanPath.includes(`/${cleanId}-voices`)) {
