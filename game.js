@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - DYNAMIC EVENT BUS, SAFE FALLBACKS & GPU VRAM PURGE
+// GAME.JS - OFFICIAL HSCRIPT-ALIGNED ENGINE (ALL 5 DLC SONGS & CUTSCENES)
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -19,7 +19,7 @@ function drawArrowShape(graphics, color, size = 32) {
 let playState = null;
 
 class PlayStateScene {
-    constructor(songItem, dadChar, bfChar, gfChar, stageData, stageProps, stageJson) {
+    constructor(songItem, dadChar, bfChar, gfChar, stageData, stageProps, stageJson, extraChars = {}) {
         this.songItem = songItem;
         this.speed = songItem.speed || 2.5;
 
@@ -29,6 +29,7 @@ class PlayStateScene {
         this.dad = dadChar;
         this.bf = bfChar;
         this.gf = gfChar;
+        this.extraChars = extraChars; // maroon, maroonParasite, grey
 
         this.notes = [];
         this.events = [];
@@ -41,17 +42,14 @@ class PlayStateScene {
         this.health = 1.0;
 
         this.gfDanceLeft = false;
-        this.animatedProps = {};
-        this.discussSprite = null;
+        this.props = {};
 
-        // V-Slice Camera Zoom
+        // Base Stage Zoom
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
 
-        this.camTargetX = 640;
-        this.camTargetY = 360;
-        this.camFocusX = 640;
-        this.camFocusY = 360;
+        // Official Stage Camera Anchors from HXC scripts!
+        this.initStageCameras(songItem.id.toLowerCase());
 
         this.setupStage(stageData, stageProps, stageJson);
         this.setupCharacters(stageJson);
@@ -61,6 +59,45 @@ class PlayStateScene {
 
         app.stage.addChild(this.worldContainer);
         app.stage.addChild(this.hudContainer);
+    }
+
+    initStageCameras(songId) {
+        if (songId.includes('49')) {
+            this.dadCam = [500, 450];
+            this.bfCam = [850, 450];
+            this.camTargetX = 800;
+            this.camTargetY = 450;
+        } else if (songId.includes('suspect')) {
+            this.dadCam = [650, 450];
+            this.bfCam = [700, 450];
+            this.camTargetX = 800;
+            this.camTargetY = 450;
+        } else if (songId.includes('trot')) {
+            this.dadCam = [540, 380];
+            this.bfCam = [900, 380];
+            this.camTargetX = 900;
+            this.camTargetY = 380;
+        } else if (songId.includes('lied')) {
+            this.dadCam = [640, 450];
+            this.bfCam = [810, 450];
+            this.camTargetX = 800;
+            this.camTargetY = 450;
+        } else if (songId.includes('threat')) {
+            this.dadCam = [950, 550];
+            this.bfCam = [950, 550];
+            this.camTargetX = 1100;
+            this.camTargetY = 550;
+            this.baseZoom = 0.55;
+            this.camZoom = 0.55;
+        } else {
+            this.dadCam = [600, 450];
+            this.bfCam = [850, 450];
+            this.camTargetX = 725;
+            this.camTargetY = 450;
+        }
+
+        this.camFocusX = this.camTargetX;
+        this.camFocusY = this.camTargetY;
     }
 
     setupStage(stageData, stageProps, stageJson) {
@@ -77,14 +114,17 @@ class PlayStateScene {
                     const g = new PIXI.Graphics();
                     const hexColor = parseInt(p.assetPath.replace('#', '0x'), 16) || 0x000000;
                     g.beginFill(hexColor);
-                    g.drawRect(-3000, -3000, 8000, 8000);
+                    g.drawRect(-4000, -4000, 10000, 10000);
                     g.endFill();
                     
-                    g.alpha = 0;
+                    g.alpha = 0; // Starts hidden; driven by HXC events
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
                     g.zIndex = p.zIndex || 0;
+
+                    const propName = p.name ? p.name.toLowerCase() : cleanName;
+                    this.props[propName] = g;
 
                     if (p.zIndex >= 300) this.stageFront.addChild(g);
                     else this.stageBack.addChild(g);
@@ -100,12 +140,13 @@ class PlayStateScene {
                     aSpr.zIndex = p.zIndex || 0;
                     aSpr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     aSpr.loop = false;
+                    aSpr.animationSpeed = 24 / 60;
 
                     this.stageBack.addChild(aSpr);
 
                     const propName = p.name ? p.name.toLowerCase() : cleanName;
-                    this.animatedProps[propName] = aSpr;
-                    this.animatedProps[cleanName] = aSpr;
+                    this.props[propName] = aSpr;
+                    this.props[cleanName] = aSpr;
                 }
                 // 3. Static Props
                 else if (tex) {
@@ -122,12 +163,8 @@ class PlayStateScene {
                     spr.zIndex = p.zIndex || 0;
 
                     const propName = p.name ? p.name.toLowerCase() : cleanName;
-                    this.animatedProps[propName] = spr;
-
-                    if (cleanName === 'discuss') {
-                        this.discussSprite = spr;
-                        spr.alpha = 0;
-                    }
+                    this.props[propName] = spr;
+                    this.props[cleanName] = spr;
 
                     if (p.zIndex >= 300) {
                         this.stageFront.addChild(spr);
@@ -149,7 +186,6 @@ class PlayStateScene {
         this.worldContainer.addChild(this.stageBack);
     }
 
-    // REVISION 3: SAFE POSITION FALLBACKS DRIVEN BY STAGE JSON
     setupCharacters(stageJson) {
         const c = (stageJson && stageJson.characters) ? stageJson.characters : null;
 
@@ -176,24 +212,29 @@ class PlayStateScene {
         if (this.dad) this.worldContainer.addChild(this.dad.container);
         if (this.bf) this.worldContainer.addChild(this.bf.container);
 
+        // Triple Threat Extra Characters (Maroon, Grey, Maroon Parasite)
+        if (this.extraChars.maroon) {
+            this.extraChars.maroon.container.position.set(-950, 530);
+            this.extraChars.maroon.container.visible = false;
+            this.worldContainer.addChild(this.extraChars.maroon.container);
+        }
+        if (this.extraChars.grey) {
+            this.extraChars.grey.container.position.set(-700, 600);
+            this.extraChars.grey.container.visible = false;
+            this.worldContainer.addChild(this.extraChars.grey.container);
+        }
+        if (this.extraChars.maroonParasite) {
+            this.extraChars.maroonParasite.container.position.set(-350, 240);
+            this.extraChars.maroonParasite.container.visible = false;
+            this.worldContainer.addChild(this.extraChars.maroonParasite.container);
+        }
+
         this.worldContainer.addChild(this.stageFront);
-
-        // Stage midpoint initialization
-        const stageMidX = (dadPos[0] + bfPos[0]) / 2;
-        const stageMidY = (dadPos[1] + bfPos[1]) / 2 - 100;
-
-        this.stageCenterX = stageMidX;
-        this.stageCenterY = stageMidY;
-
-        this.camTargetX = stageMidX;
-        this.camTargetY = stageMidY;
-        this.camFocusX = stageMidX;
-        this.camFocusY = stageMidY;
     }
 
     setupStrumlines() {
-        const startX_Opponent = 120;
-        const startX_Player = 760;
+        const startX_Opponent = 96;
+        const startX_Player = 1280 - 96 - (4 * 110);
         const receptorY = 85;
         const spacing = 110;
 
@@ -220,7 +261,6 @@ class PlayStateScene {
         }
     }
 
-    // REVISION 4: DYNAMIC CHART EVENT BUS PARSER
     parseChartNotes(chart) {
         this.notes = [];
         this.events = [];
@@ -231,14 +271,13 @@ class PlayStateScene {
 
         // 1. Chart Events
         if (data.events && Array.isArray(data.events)) {
-            data.events.forEach(evtGroup => {
-                const time = evtGroup[0];
-                const subEvents = evtGroup[1];
-                if (Array.isArray(subEvents)) {
-                    subEvents.forEach(e => {
-                        this.events.push({
-                            time: time, name: e[0], val1: e[1], val2: e[2], fired: false
-                        });
+            data.events.forEach(evt => {
+                if (evt.t !== undefined) {
+                    this.events.push({
+                        time: evt.t,
+                        name: evt.e,
+                        val: evt.v,
+                        fired: false
                     });
                 }
             });
@@ -247,7 +286,7 @@ class PlayStateScene {
 
         // 2. V-Slice Notes
         if (data.notes && typeof data.notes === 'object' && !Array.isArray(data.notes)) {
-            const diffNotes = data.notes.normal || data.notes.hard || data.notes.default || Object.values(data.notes)[0];
+            const diffNotes = data.notes.hard || data.notes.normal || data.notes.default || Object.values(data.notes)[0];
             if (Array.isArray(diffNotes)) {
                 diffNotes.forEach(n => {
                     const rawDir = n.d !== undefined ? n.d : (n.dir || 0);
@@ -255,56 +294,10 @@ class PlayStateScene {
                         time: n.t !== undefined ? n.t : n.time,
                         dir: rawDir % 4,
                         isPlayer: (rawDir < 4),
+                        kind: n.k || '',
                         sustain: n.l !== undefined ? n.l : (n.sLen || 0),
                         hit: false, missed: false, sprite: null, tailSprite: null
                     });
-                });
-            }
-        }
-
-        // 3. Codename strumLines
-        const strumLines = data.strumLines || (data.song && data.song.strumLines);
-        if (this.notes.length === 0 && Array.isArray(strumLines)) {
-            strumLines.forEach((strum, lineIndex) => {
-                const isPlayer = (strum.type === 1) || (lineIndex === 1);
-                if (Array.isArray(strum.notes)) {
-                    strum.notes.forEach(n => {
-                        this.notes.push({
-                            time: n.time || 0,
-                            dir: (n.id !== undefined ? n.id : (n.dir || 0)) % 4,
-                            isPlayer: isPlayer,
-                            sustain: n.sLen || n.sustain || 0,
-                            hit: false, missed: false, sprite: null, tailSprite: null
-                        });
-                    });
-                }
-            });
-        }
-
-        // 4. Psych sections
-        if (this.notes.length === 0) {
-            let sections = songObj.notes || data.notes || [];
-            if (sections && typeof sections === 'object' && !Array.isArray(sections)) {
-                sections = Object.values(sections);
-            }
-
-            if (Array.isArray(sections)) {
-                sections.forEach(section => {
-                    if (section && Array.isArray(section.sectionNotes)) {
-                        section.sectionNotes.forEach(n => {
-                            if (!Array.isArray(n) || n.length < 2) return;
-                            const rawDir = n[1];
-                            if (rawDir < 0) return;
-
-                            this.notes.push({
-                                time: n[0],
-                                dir: rawDir % 4,
-                                isPlayer: (rawDir < 4),
-                                sustain: n[2] || 0,
-                                hit: false, missed: false, sprite: null, tailSprite: null
-                            });
-                        });
-                    }
                 });
             }
         }
@@ -435,25 +428,47 @@ class PlayStateScene {
         this.bfIcon.position.set(splitX + 35, 0);
     }
 
-    // REVISION 4: DYNAMIC EVENT DISPATCHER
-    triggerEvent(name, val1, val2) {
-        switch(name.toLowerCase()) {
-            case 'camera follow pos':
-            case 'set cam position':
-                const x = parseFloat(val1);
-                const y = parseFloat(val2);
-                if (!isNaN(x)) this.camTargetX = x;
-                if (!isNaN(y)) this.camTargetY = y;
-                break;
-                
-            case 'play animation':
-                if (this.dad && val2 === 'dad') this.dad.playAnim(val1, true);
-                if (this.bf && (val2 === 'bf' || val2 === 'boyfriend')) this.bf.playAnim(val1, true);
+    // Dynamic Chart Event Handler (FocusCamera, ZoomCamera, ChangeCharacter, ChangeSuffix, ReactorBeep)
+    triggerEvent(e) {
+        const name = e.name;
+        const val = e.val || {};
+
+        switch(name) {
+            case 'FocusCamera':
+                if (val.char === 1) {
+                    this.camTargetX = this.dadCam[0];
+                    this.camTargetY = this.dadCam[1];
+                } else if (val.char === 0) {
+                    this.camTargetX = this.bfCam[0];
+                    this.camTargetY = this.bfCam[1];
+                } else if (val.char === -1 && val.x !== undefined && val.y !== undefined) {
+                    this.camTargetX = val.x;
+                    this.camTargetY = val.y;
+                }
                 break;
 
-            case 'set zoom':
-                const z = parseFloat(val1);
-                if (!isNaN(z)) this.baseZoom = z;
+            case 'ClassicCameraZoom':
+            case 'ZoomCamera':
+                if (val.zoom !== undefined) {
+                    this.baseZoom = val.zoom;
+                }
+                break;
+
+            case 'ChangeSuffix':
+                if (val.char === 'dad' && this.dad) this.dad.idleSuffix = val.suffix || '';
+                if (val.char === 'bf' && this.bf) this.bf.idleSuffix = val.suffix || '';
+                break;
+
+            case 'ReactorBeep':
+                if (this.props['blooodfuckkk']) {
+                    this.props['blooodfuckkk'].alpha = 0.4;
+                    setTimeout(() => { if (this.props['blooodfuckkk']) this.props['blooodfuckkk'].alpha = 0; }, 150);
+                }
+                break;
+
+            case 'PlayAnimation':
+                if (val.target === 'dad' && this.dad) this.dad.playAnim(val.anim, true);
+                if (val.target === 'bf' && this.bf) this.bf.playAnim(val.anim, true);
                 break;
         }
     }
@@ -467,22 +482,21 @@ class PlayStateScene {
         if (this.bf) this.bf.update(deltaSec);
         if (this.gf && this.gf.container.visible) this.gf.update(deltaSec);
 
-        // REVISION 4: Process Chart Events
+        // Update Triple Threat extra characters
+        if (this.extraChars.maroon && this.extraChars.maroon.container.visible) this.extraChars.maroon.update(deltaSec);
+        if (this.extraChars.grey && this.extraChars.grey.container.visible) this.extraChars.grey.update(deltaSec);
+        if (this.extraChars.maroonParasite && this.extraChars.maroonParasite.container.visible) this.extraChars.maroonParasite.update(deltaSec);
+
+        // Process Chart Events
         for (let i = 0; i < this.events.length; i++) {
             const e = this.events[i];
             if (!e.fired && songPos >= e.time) {
                 e.fired = true;
-                this.triggerEvent(e.name, e.val1, e.val2);
+                this.triggerEvent(e);
             }
         }
 
-        // Icon bounce lerp
-        this.dadIcon.scale.x += (1.0 - this.dadIcon.scale.x) * 0.15;
-        this.dadIcon.scale.y += (1.0 - this.dadIcon.scale.y) * 0.15;
-        this.bfIcon.scale.x += (1.0 - this.bfIcon.scale.x) * 0.15;
-        this.bfIcon.scale.y += (1.0 - this.bfIcon.scale.y) * 0.15;
-
-        // Smooth Camera Lerp
+        // Camera Lerp
         this.camFocusX += (this.camTargetX - this.camFocusX) * 0.05;
         this.camFocusY += (this.camTargetY - this.camFocusY) * 0.05;
         this.camZoom += (this.baseZoom - this.camZoom) * 0.08;
@@ -502,7 +516,7 @@ class PlayStateScene {
 
             const diff = n.time - songPos;
 
-            // Opponent note hit: gentle camera nudge
+            // Opponent note hit
             if (!n.isPlayer && diff <= 0) {
                 n.hit = true;
                 n.sprite.visible = false;
@@ -510,10 +524,18 @@ class PlayStateScene {
                 this.hitReceptor(n.dir, false);
 
                 const anims = ['left', 'down', 'up', 'right'];
-                if (this.dad) {
-                    this.dad.playAnim(anims[n.dir], true);
-                    this.camTargetX = this.stageCenterX - 80;
-                    this.camTargetY = this.stageCenterY;
+                const animToPlay = anims[n.dir];
+
+                // Triple Threat Note Delegation!
+                if (n.kind === 'maroon' && this.extraChars.maroon && this.extraChars.maroon.container.visible) {
+                    this.extraChars.maroon.playAnim(animToPlay, true);
+                } else if (n.kind === 'grey' && this.extraChars.grey && this.extraChars.grey.container.visible) {
+                    this.extraChars.grey.playAnim(animToPlay, true);
+                } else if (n.kind === 'maroonP' && this.extraChars.maroonParasite && this.extraChars.maroonParasite.container.visible) {
+                    this.extraChars.maroonParasite.playAnim(animToPlay, true);
+                } else if (this.dad) {
+                    const suffix = this.dad.idleSuffix || '';
+                    this.dad.playAnim(animToPlay + suffix, true);
                 }
                 continue;
             }
@@ -537,7 +559,7 @@ class PlayStateScene {
                 continue;
             }
 
-            // Draw note on screen
+            // Draw note
             if (diff > -200 && diff < 1600) {
                 const targetReceptor = this.receptors[n.isPlayer ? n.dir + 4 : n.dir];
                 const noteY = receptorY + (diff * scrollMult);
@@ -577,8 +599,6 @@ class PlayStateScene {
         const anims = ['left', 'down', 'up', 'right'];
         if (this.bf) {
             this.bf.playAnim(anims[dir], true);
-            this.camTargetX = this.stageCenterX + 80;
-            this.camTargetY = this.stageCenterY;
         }
 
         let closest = null;
@@ -604,7 +624,10 @@ class PlayStateScene {
             this.totalNotesPossible++;
             this.health = Math.min(2.0, this.health + 0.045);
 
-            if (minDiff <= 45) {
+            if (minDiff <= 22.5) {
+                this.score += 400;
+                this.showRating("EPIC!", 0x66fcf1);
+            } else if (minDiff <= 45) {
                 this.score += 350;
                 this.showRating("SICK!", 0x00d2d3);
             } else if (minDiff <= 90) {
@@ -631,62 +654,126 @@ class PlayStateScene {
         this.scoreText.text = `Score: ${this.score} | Misses: ${this.misses} | Accuracy: ${acc}%`;
     }
 
-    // REVISION 3: GPU VRAM MEMORY CLEANUP
     destroy() {
         app.stage.removeChild(this.worldContainer);
         app.stage.removeChild(this.hudContainer);
-
-        // Purges underlying WebGL baseTextures from GPU to prevent tab crashes
         this.worldContainer.destroy({ children: true, texture: true, baseTexture: true });
         this.hudContainer.destroy({ children: true });
     }
 }
 
 // ============================================================================
-// SCRIPTED MOMENTS & BEAT HIT CALLBACKS
+// OFFICIAL HXC STAGE DIRECTORS (100% SCRIPT-ACCURATE CHOREOGRAPHY)
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // 1. "49" Stage Event (security.hxc Step 993)
+    // 1. "49" (security.hxc)
     if (currentSong.includes('49')) {
         if (step === 993) {
-            if (playState.animatedProps['graypet']) playState.animatedProps['graypet'].alpha = 0.001;
-            if (playState.animatedProps['tawny']) playState.animatedProps['tawny'].alpha = 0.001;
-            if (playState.animatedProps['deadtawny']) playState.animatedProps['deadtawny'].alpha = 1;
-            playState.camTargetX = 270;
-            playState.camTargetY = 450;
+            if (playState.props['graypet']) playState.props['graypet'].alpha = 0.001;
+            if (playState.props['tawny']) playState.props['tawny'].alpha = 0.001;
+            if (playState.props['deadtawny']) playState.props['deadtawny'].alpha = 1;
+            playState.dadCam = [270, 450];
         }
     }
 
-    // 2. "Suspect" Cutscene Events (security2.hxc)
+    // 2. "Suspect" (security2.hxc)
     if (currentSong.includes('suspect')) {
-        if (step === 60 && playState.discussSprite) {
-            playState.discussSprite.alpha = 1;
+        if (step === 48) {
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 1;
+            playState.hudContainer.visible = false;
         }
-        if (step === 64 && playState.discussSprite) {
-            playState.discussSprite.alpha = 0;
+        if (step === 60) {
+            if (playState.props['discuss']) playState.props['discuss'].alpha = 1;
+        }
+        if (step === 64) {
+            if (playState.props['discuss']) playState.props['discuss'].alpha = 0;
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 0;
+            playState.hudContainer.visible = true;
+            playState.baseZoom = 0.75;
+        }
+        if (step === 448 || step === 464 || step === 480) { // detective cuts
+            playState.camTargetX = 500;
+            playState.camTargetY = 450;
+        }
+        if (step === 460 || step === 476 || step === 492) { // pico cuts
+            playState.camTargetX = 850;
+            playState.camTargetY = 450;
         }
         if (step === 805) {
-            if (playState.bf) {
-                playState.bf.playAnim('lock in', true);
-                playState.bf.holdTimer = 1.5;
-            }
+            if (playState.bf) playState.bf.playAnim('lock in', true);
+            if (playState.props['player']) playState.props['player'].playAnimation('die', true);
         }
         if (step === 812) {
-            if (playState.bf) {
-                playState.bf.playAnim('cock', true);
-                playState.bf.holdTimer = 1.0;
-            }
-            if (playState.dad) playState.dad.playAnim('right', true);
+            if (playState.bf) playState.bf.playAnim('cock', true);
+            if (playState.dad) playState.dad.playAnim('singRIGHT', true);
         }
         if (step === 816) {
-            if (playState.bf) {
-                playState.bf.playAnim('blast', true);
-                playState.bf.holdTimer = 1.2;
+            if (playState.bf) playState.bf.playAnim('blast', true);
+            if (playState.dad) playState.dad.playAnim('shock', true);
+        }
+    }
+
+    // 3. "Trot Away" (horse.hxc)
+    if (currentSong.includes('trot')) {
+        if (step === 840) { // Lights out & stampede starts!
+            if (playState.props['subtract']) playState.props['subtract'].alpha = 0.5;
+            if (playState.props['horse1']) playState.props['horse1'].position.x += 10;
+        }
+        if (step === 1096) { // Caught horse appears!
+            if (playState.props['caught']) playState.props['caught'].alpha = 1;
+            if (playState.props['subtract']) playState.props['subtract'].alpha = 0.11;
+        }
+    }
+
+    // 4. "Don't Lied" (medbay.hxc)
+    if (currentSong.includes('lied')) {
+        if (step === 1184) {
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 1;
+        }
+        if (step === 1232) {
+            if (playState.dad) playState.dad.container.position.x = 690; // Steps forward!
+        }
+        if (step === 1376) {
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 0;
+        }
+        if (step === 1394) {
+            if (playState.dad) playState.dad.playAnim('stab', true);
+        }
+        if (step === 1396) {
+            if (playState.props['blooodfuckkk']) {
+                playState.props['blooodfuckkk'].alpha = 0.8;
+                setTimeout(() => { if (playState.props['blooodfuckkk']) playState.props['blooodfuckkk'].alpha = 0; }, 1200);
             }
-            playState.camZoom = playState.baseZoom + 0.08;
+            if (playState.gf) playState.gf.playAnim('sad', true);
+        }
+    }
+
+    // 5. "Triple Threat" (beach.hxc)
+    if (currentSong.includes('threat')) {
+        if (step === 240) { // Maroon enters!
+            if (playState.extraChars.maroon) {
+                playState.extraChars.maroon.container.visible = true;
+                playState.extraChars.maroon.container.position.x = playState.dad.container.position.x - 150;
+            }
+            if (playState.dad) {
+                playState.dad.playAnim('wow', true);
+                playState.dad.container.position.x += 150;
+            }
+        }
+        if (step === 690) { // Grey enters!
+            if (playState.extraChars.grey) {
+                playState.extraChars.grey.container.visible = true;
+            }
+        }
+        if (step === 1320) { // Maroon turns into parasite!
+            if (playState.extraChars.maroon) playState.extraChars.maroon.container.visible = false;
+            if (playState.extraChars.maroonParasite) {
+                playState.extraChars.maroonParasite.container.visible = true;
+                playState.extraChars.maroonParasite.container.position.x = playState.dad.container.position.x - 180;
+            }
         }
     }
 }
@@ -695,21 +782,18 @@ function onBeatHit(beat) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // 49 Stage Prop Bopping from security.hxc
+    // Prop beat bopping from security.hxc
     if (currentSong.includes('49')) {
-        if (beat % 2 === 0 && playState.animatedProps['shit']) {
-            playState.animatedProps['shit'].gotoAndPlay(0);
-        }
+        if (beat % 2 === 0 && playState.props['shit']) playState.props['shit'].gotoAndPlay(0);
         if (beat % 1 === 0) {
-            if (playState.animatedProps['tawny']) playState.animatedProps['tawny'].gotoAndPlay(0);
-            if (playState.animatedProps['graypet']) playState.animatedProps['graypet'].gotoAndPlay(0);
+            if (playState.props['tawny']) playState.props['tawny'].gotoAndPlay(0);
+            if (playState.props['graypet']) playState.props['graypet'].gotoAndPlay(0);
         }
     }
 
-    if (currentSong.includes('trot')) {
-        playState.camZoom = playState.baseZoom + (beat % 2 === 0 ? 0.04 : 0.015);
-    } else {
-        playState.camZoom = playState.baseZoom + 0.035;
+    // Horse prop bopping
+    if (currentSong.includes('trot') && beat % 2 === 0 && playState.props['caught']) {
+        playState.props['caught'].gotoAndPlay(0);
     }
 
     if (playState.dadIcon) playState.dadIcon.scale.set(1.25);
@@ -722,6 +806,10 @@ function onBeatHit(beat) {
 
     if (playState.dad && playState.dad.holdTimer <= 0) playState.dad.playAnim('idle');
     if (playState.bf && playState.bf.holdTimer <= 0) playState.bf.playAnim('idle');
+
+    if (playState.extraChars.maroon && playState.extraChars.maroon.holdTimer <= 0) playState.extraChars.maroon.playAnim('idle');
+    if (playState.extraChars.grey && playState.extraChars.grey.holdTimer <= 0) playState.extraChars.grey.playAnim('idle');
+    if (playState.extraChars.maroonParasite && playState.extraChars.maroonParasite.holdTimer <= 0) playState.extraChars.maroonParasite.playAnim('idle');
 
     playState.receptors.forEach(r => {
         r.container.scale.set(1.06);
@@ -843,9 +931,17 @@ async function launchSong(item) {
         // 1. Load Main Characters
         const dadChar = await loadCharacter(item.player2, false, false);
         const bfChar = await loadCharacter(item.player1, true, false);
-        const gfChar = await loadCharacter('gf', false, true);
+        const gfChar = await loadCharacter(item.id.includes('suspect') ? 'deadnoob49' : (item.id.includes('trot') ? 'gfweird-sheriff' : 'gfweird'), false, true);
 
-        // 2. Load Stage Dynamically
+        // 2. Extra Characters for Triple Threat
+        const extraChars = {};
+        if (cleanId.includes('threat')) {
+            extraChars.maroon = await loadCharacter('maroonthreat', false, false);
+            extraChars.grey = await loadCharacter('greythreat', false, false);
+            extraChars.maroonParasite = await loadCharacter('maroonParasite', false, false);
+        }
+
+        // 3. Load Stage Dynamically
         const stageData = {};
         const stageFolder = (item.stage || 'security').toLowerCase().includes('sec') ? 'security' : (item.stage || 'security').toLowerCase();
         const stageJson = VirtualFS.stageJsons[item.stage] || VirtualFS.stageJsons[stageFolder] || null;
@@ -863,7 +959,7 @@ async function launchSong(item) {
             }
         }
 
-        // 3. Dynamic Animated Props Detection
+        // 4. Dynamic Animated Props Detection
         const stageProps = {};
         for (const path of Object.keys(VirtualFS.assets)) {
             if (path.includes(`bg/${stageFolder}/`)) {
@@ -874,7 +970,7 @@ async function launchSong(item) {
             }
         }
 
-        playState = new PlayStateScene(item, dadChar, bfChar, gfChar, stageData, stageProps, stageJson);
+        playState = new PlayStateScene(item, dadChar, bfChar, gfChar, stageData, stageProps, stageJson, extraChars);
 
         setTimeout(() => {
             if (playState) {
