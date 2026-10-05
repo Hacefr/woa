@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - ZERO-TELEPORT DUAL-ENGINE (ROOT MATRIX SYNCHRONIZATION)
+// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (NO-TELEPORT MATRIX SYNCHRONIZATION)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE (WITH FLASH ROOT-MATRIX RESTORATION)
+// 2. DYNAMIC TEXTURE ATLAS ENGINE (ACCURATE MATRIX PRESERVATION)
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -120,9 +120,6 @@ class DynamicAtlasCharacter {
         this.isPlayer = isPlayer;
         this.isGF = isGF;
         this.isPico = this.charName.includes('pico');
-        this.isDetective = this.charName.includes('detective');
-        this.isHorse = this.charName.includes('horse');
-        this.isNoob = this.charName.includes('noob');
         
         this.container = new PIXI.Container();
         this.displayContainer = new PIXI.Container();
@@ -143,7 +140,7 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels & Root Matrices
+        // 3. Scan Master Timeline (AN.TL.L)
         this.timelineAnims = {};
         this.masterLayers = (animJson.AN && animJson.AN.TL && animJson.AN.TL.L) ? animJson.AN.TL.L : [];
         this.rootMatrices = {};
@@ -165,26 +162,43 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 4. Scan Symbols for Direct Animation Names (BF, Pico, GF)
-        this.symbolAnims = {};
+        // 4. Map Character Animations to Flash Symbols & Store Their Exact Root Matrices
+        this.animMap = {};
         this.animMatrices = {};
 
+        // Also check character JSON if provided
+        const charConfig = VirtualFS.charJsons[this.charName] || {};
+
+        if (charConfig.animations) {
+            charConfig.animations.forEach(a => {
+                const prefixLower = a.prefix.toLowerCase();
+                const matchedSym = Object.keys(this.symbols).find(s => s.toLowerCase().startsWith(prefixLower) || prefixLower.startsWith(s.toLowerCase()));
+                if (matchedSym) {
+                    this.animMap[a.name.toLowerCase()] = matchedSym;
+                    this.animMatrices[a.name.toLowerCase()] = this.rootMatrices[matchedSym] || new PIXI.Matrix();
+                }
+            });
+        }
+
+        // Fallback symbol scanning for standard names
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
             const assign = (key) => {
-                this.symbolAnims[key] = symName;
-                this.animMatrices[key] = this.rootMatrices[symName] || new PIXI.Matrix();
+                if (!this.animMap[key]) {
+                    this.animMap[key] = symName;
+                    this.animMatrices[key] = this.rootMatrices[symName] || new PIXI.Matrix();
+                }
             };
 
             if (this.isGF) {
                 if (lower.includes('idle1') || lower.includes('idleleft')) assign('idleleft');
                 if (lower.includes('idle2') || lower.includes('idleright')) assign('idleright');
             } else {
-                if (lower.includes('idle') && !this.symbolAnims['idle']) assign('idle');
-                if (lower.includes('left') && !lower.includes('miss') && !this.symbolAnims['left']) { assign('left'); assign('singleft'); }
-                if (lower.includes('down') && !lower.includes('miss') && !this.symbolAnims['down']) { assign('down'); assign('singdown'); }
-                if (lower.includes('up') && !lower.includes('miss') && !this.symbolAnims['up']) { assign('up'); assign('singup'); }
-                if (lower.includes('right') && !lower.includes('miss') && !this.symbolAnims['right']) { assign('right'); assign('singright'); }
+                if (lower.includes('idle')) assign('idle');
+                if (lower.includes('left') && !lower.includes('miss')) { assign('left'); assign('singleft'); }
+                if (lower.includes('down') && !lower.includes('miss')) { assign('down'); assign('singdown'); }
+                if (lower.includes('up') && !lower.includes('miss')) { assign('up'); assign('singup'); }
+                if (lower.includes('right') && !lower.includes('miss')) { assign('right'); assign('singright'); }
 
                 if (lower.includes('miss')) {
                     if (lower.includes('left')) assign('singleftmiss');
@@ -212,8 +226,8 @@ class DynamicAtlasCharacter {
 
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        
-        // 1. Check Timeline Labels first
+
+        // 1. Timeline Labels Mode (Detective, Horsemate)
         let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -234,17 +248,21 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // 2. Check Symbol Names mode (BF, Pico, GF)
-        let targetSymbolKey = Object.keys(this.symbolAnims).find(k => k === clean || clean.includes(k));
-        if (!targetSymbolKey && animName.includes('idle')) targetSymbolKey = this.isGF ? 'idleleft' : 'idle';
+        // 2. Symbol Names Mode (Boyfriend, Pico, Girlfriend)
+        let targetKey = Object.keys(this.animMap).find(k => {
+            const kc = k.replace(/[^a-z0-9]/g, '');
+            return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
+        });
 
-        if (targetSymbolKey && this.symbolAnims[targetSymbolKey]) {
+        if (!targetKey && animName.includes('idle')) targetKey = this.isGF ? 'idleleft' : 'idle';
+
+        if (targetKey && this.animMap[targetKey]) {
             this.mode = 'symbol';
-            this.currentAnim = targetSymbolKey;
-            this.activeSymbolName = this.symbolAnims[targetSymbolKey];
+            this.currentAnim = targetKey;
+            this.activeSymbolName = this.animMap[targetKey];
             this.frame = 0;
             this.frameTimer = 0;
-            if (!targetSymbolKey.includes('idle')) this.holdTimer = 0.35;
+            if (!targetKey.includes('idle')) this.holdTimer = 0.35;
             this.renderCurrentFrame();
         }
     }
@@ -297,20 +315,9 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 1. TIMELINE MODE (Detective, Horsemate, Noob49)
+        // 1. TIMELINE MODE (Detective & Horsemate)
         if (this.mode === 'timeline' && this.activeAnimData) {
             const masterFrame = this.activeAnimData.startFrame + this.frame;
-
-            let groundOffsetX = 0;
-            let groundOffsetY = -480;
-
-            if (this.isNoob) {
-                groundOffsetX = 0;
-                groundOffsetY = -460; // Perfectly lifts Noob49 so feet rest on the floor
-            } else if (this.isHorse) {
-                groundOffsetX = 0;
-                groundOffsetY = -420;
-            }
 
             for (let l = this.masterLayers.length - 1; l >= 0; l--) {
                 const layer = this.masterLayers[l];
@@ -328,7 +335,6 @@ class DynamicAtlasCharacter {
 
                 for (const el of activeFR.E) {
                     const baseMat = new PIXI.Matrix();
-                    baseMat.translate(groundOffsetX, groundOffsetY);
 
                     if (el.ASI) {
                         const tex = this.spritemap[el.ASI.N];
@@ -354,7 +360,7 @@ class DynamicAtlasCharacter {
         }
 
         // 2. SYMBOL MODE (Boyfriend, Pico, Girlfriend)
-        // CRITICAL FIX: Clones animation-specific Flash matrix to STOP BOYFRIEND TELEPORTING!
+        // Uses the exact matrix exported by Flash for each animation to prevent teleportation!
         if (this.mode === 'symbol' && this.activeSymbolName) {
             const animMat = this.animMatrices[this.currentAnim] || this.rootMatrices[this.activeSymbolName] || new PIXI.Matrix();
             const rootMat = animMat.clone();
@@ -495,38 +501,6 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
             return new DynamicAtlasCharacter(baseTexture, animJson, spritemapJson, charName, isPlayer, isGF);
         } catch(err) {
             console.warn(`Failed loading Texture Atlas for ${charName}:`, err);
-        }
-    }
-
-    // Sparrow Sheet Check
-    let pngEntry = null;
-    let xmlEntry = null;
-
-    for (const [path, entry] of Object.entries(VirtualFS.assets)) {
-        if (!path.includes('/dialogue/') && !path.includes('/cutscene/')) {
-            if (path.endsWith(`${clean}.png`) || path.includes(`characters/dlc/${clean}/${clean}.png`)) pngEntry = entry;
-            if (path.endsWith(`${clean}.xml`) || path.includes(`characters/dlc/${clean}/${clean}.xml`)) xmlEntry = entry;
-        }
-    }
-
-    if (pngEntry && xmlEntry) {
-        try {
-            const pngBlob = await pngEntry.async('blob');
-            const xmlText = (await xmlEntry.async('string')).replace(/^\uFEFF/, '').trim();
-
-            const img = new Image();
-            img.src = URL.createObjectURL(pngBlob);
-            await new Promise(res => img.onload = res);
-
-            const baseTexture = new PIXI.BaseTexture(img);
-            const xmlDoc = new DOMParser().parseFromString(xmlText, 'text/xml');
-            const anims = parseSparrowAtlas(baseTexture, xmlDoc);
-
-            const charConfig = VirtualFS.charJsons[clean] || {};
-            console.log(`%c[SPARROW SHEET LOADED] ${charName.toUpperCase()}`, "color: #2ed573; font-weight: bold;");
-            return new SparrowCharacter(baseTexture, anims, charConfig, isPlayer);
-        } catch(e) {
-            console.error(`Failed to build Sparrow Character for ${charName}:`, e);
         }
     }
 
