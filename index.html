@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vs. Impostor Web Runner (Security DLC Upgraded)</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- Drag & Drop Staging Area -->
+    <div id="drop-overlay">
+        <div class="drop-card">
+            <h1>VS. IMPOSTOR WEB RUNNER</h1>
+            <p class="subtitle">Drop Base Game .zip and Security DLC .zip below</p>
+            
+            <div id="staged-files-list">
+                <p class="no-files-text">No files added yet. Drop your .zip or .imp files here!</p>
+            </div>
+
+            <div id="status-box" class="hidden">Waiting...</div>
+
+            <button id="start-engine-btn" class="glow-btn hidden" style="margin-top: 15px; font-size: 1.1rem; padding: 12px 28px;">
+                START ENGINE (0 Files)
+            </button>
+        </div>
+    </div>
+
+    <!-- Freeplay UI -->
+    <div id="freeplay-screen" class="hidden">
+        <header>
+            <h2>FREEPLAY</h2>
+            <div class="header-actions">
+                <span id="mod-counter">0 Songs Loaded</span>
+                <button id="export-imp-btn" class="glow-btn">Export .IMP (Fast Pack)</button>
+            </div>
+        </header>
+
+        <div id="song-grid"></div>
+    </div>
+
+    <!-- WebGL Game Screen -->
+    <div id="game-container" class="hidden"></div>
+
+    <!-- Modular Engine Scripts (Loaded in strict sequence) -->
+    <script src="core.js?v=2"></script>
+    <script src="characters.js?v=2"></script>
+    <script src="game.js?v=2"></script>
+</body>
+</html>
