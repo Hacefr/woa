@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (CORRECT FACING & TIMELINE ATLAS)
+// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (GROUND-ANCHORED & AUTO-SCALED)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -56,7 +56,7 @@ class SparrowCharacter {
 
         this.container = new PIXI.Container();
         this.sprite = new PIXI.AnimatedSprite([PIXI.Texture.EMPTY]);
-        this.sprite.anchor.set(0.5, 1.0);
+        this.sprite.anchor.set(0.5, 1.0); // Foot-anchored
         this.container.addChild(this.sprite);
 
         this.animOffsets = {};
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE
+// 2. DYNAMIC TEXTURE ATLAS ENGINE (GROUNDED FEET ALIGNMENT)
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -120,6 +120,9 @@ class DynamicAtlasCharacter {
         this.isPlayer = isPlayer;
         this.isGF = isGF;
         this.isPico = this.charName.includes('pico');
+        this.isDetective = this.charName.includes('detective');
+        this.isHorse = this.charName.includes('horse');
+        this.isNoob = this.charName.includes('noob');
         
         this.container = new PIXI.Container();
         this.displayContainer = new PIXI.Container();
@@ -140,7 +143,7 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels (Detective / Horsemate style)
+        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels
         this.timelineAnims = {};
         this.masterLayers = (animJson.AN && animJson.AN.TL && animJson.AN.TL.L) ? animJson.AN.TL.L : [];
 
@@ -156,7 +159,7 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 4. Scan Symbols for Direct Animation Names (Boyfriend / Pico style)
+        // 4. Scan Symbols for Direct Animation Names
         this.symbolAnims = {};
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
@@ -187,9 +190,8 @@ class DynamicAtlasCharacter {
         this.holdTimer = 0;
         this.fps = 24;
 
-        // FIXED: Do not invert opponents! Both opponents and players are exported with native orientation
-        const scale = 1.0;
-        this.container.scale.set(scale, scale);
+        // Native scale - no horizontal inversion!
+        this.container.scale.set(1.0, 1.0);
 
         this.playAnim(this.currentAnim, true);
     }
@@ -197,7 +199,7 @@ class DynamicAtlasCharacter {
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
         
-        // Check Timeline Labels first
+        // 1. Timeline Labels mode
         let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -218,7 +220,7 @@ class DynamicAtlasCharacter {
             return;
         }
 
-        // Check Symbol Names mode
+        // 2. Symbol Names mode
         let targetSymbolKey = Object.keys(this.symbolAnims).find(k => k === clean || clean.includes(k));
         if (!targetSymbolKey && animName.includes('idle')) targetSymbolKey = this.isGF ? 'idleleft' : 'idle';
 
@@ -281,9 +283,24 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 1. TIMELINE MODE (Detective & Horsemate)
+        // 1. TIMELINE MODE (Detective, Horsemate, Noob49)
         if (this.mode === 'timeline' && this.activeAnimData) {
             const masterFrame = this.activeAnimData.startFrame + this.frame;
+
+            // Grounding Offsets: lifts character out of floor so feet rest on position.y
+            let groundOffsetX = -150;
+            let groundOffsetY = -620; // Default humanoid height offset
+
+            if (this.isHorse) {
+                groundOffsetX = -220;
+                groundOffsetY = -560;
+            } else if (this.isDetective) {
+                groundOffsetX = -180;
+                groundOffsetY = -650;
+            } else if (this.isNoob) {
+                groundOffsetX = -150;
+                groundOffsetY = -600;
+            }
 
             for (let l = this.masterLayers.length - 1; l >= 0; l--) {
                 const layer = this.masterLayers[l];
@@ -301,6 +318,7 @@ class DynamicAtlasCharacter {
 
                 for (const el of activeFR.E) {
                     const baseMat = new PIXI.Matrix();
+                    baseMat.translate(groundOffsetX, groundOffsetY);
 
                     if (el.ASI) {
                         const tex = this.spritemap[el.ASI.N];
