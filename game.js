@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - PLAYSTATE SCENE, DYNAMIC STAGE BUILDER, NOTE LOGIC & SONG SCRIPTS
+// GAME.JS - PLAYSTATE SCENE, V-SLICE CAMERA ENGINE, PROPS & SCRIPT DIRECTORS
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -43,10 +43,15 @@ class PlayStateScene {
         this.animatedProps = [];
         this.discussSprite = null;
 
-        // Adaptive Camera Zoom
-        this.camTargetX = 640;
+        // V-Slice Camera System
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
+
+        // Dynamic Camera Targets
+        this.camFocusX = 640;
+        this.camFocusY = 360;
+        this.camTargetX = 640;
+        this.camTargetY = 360;
 
         this.setupStage(stageData, stageProps, stageJson);
         this.setupCharacters(stageJson);
@@ -67,14 +72,36 @@ class PlayStateScene {
                 const cleanName = p.assetPath.split('/').pop().toLowerCase();
                 const tex = stageData[cleanName];
 
-                // Check for animated XML prop (horses, caughthorse, boppers, tawny, minigrey, shit)
+                // 1. Hex Color Overlays (#000000, #FF0000)
+                if (p.assetPath && p.assetPath.startsWith('#')) {
+                    const hexColor = parseInt(p.assetPath.replace('#', '0x'), 16) || 0x000000;
+                    const g = new PIXI.Graphics();
+                    g.beginFill(hexColor);
+                    g.drawRect(-2000, -2000, 6000, 6000);
+                    g.endFill();
+                    g.alpha = (p.alpha !== undefined) ? p.alpha : 1;
+                    if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
+                    if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
+                    if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
+                    g.zIndex = p.zIndex || 0;
+
+                    if (p.zIndex >= 300) this.stageFront.addChild(g);
+                    else this.stageBack.addChild(g);
+                    return;
+                }
+
+                // 2. Animated XML Props (horses, caughthorse, boppers, tawny, player)
                 if (stageProps[cleanName]) {
                     const animTextures = Object.values(stageProps[cleanName])[0];
                     const aSpr = new PIXI.AnimatedSprite(animTextures);
                     aSpr.position.set(p.position[0], p.position[1]);
                     aSpr.scale.set(p.scale || 1);
                     aSpr.zIndex = p.zIndex || 0;
+
+                    // FIX: Respect p.alpha on animated props! (Hides caughthorse/playerguy until triggered)
+                    aSpr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     aSpr.loop = false;
+
                     this.stageBack.addChild(aSpr);
 
                     this.animatedProps.push({
@@ -82,12 +109,14 @@ class PlayStateScene {
                         bopInterval: (cleanName === 'shit' || cleanName.includes('bopper2')) ? 2 : 1
                     });
                 }
+                // 3. Static Props
                 else if (tex) {
                     const spr = new PIXI.Sprite(tex);
                     spr.position.set(p.position[0], p.position[1]);
                     spr.scale.set(p.scale || 1);
                     spr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     if (p.blend === 'subtract') spr.blendMode = PIXI.BLEND_MODES.SUBTRACT;
+                    if (p.blend === 'add') spr.blendMode = PIXI.BLEND_MODES.ADD;
                     spr.zIndex = p.zIndex || 0;
 
                     if (cleanName === 'discuss') {
@@ -116,35 +145,44 @@ class PlayStateScene {
     }
 
     setupCharacters(stageJson) {
-        if (stageJson && stageJson.characters) {
-            const c = stageJson.characters;
-            
-            // Check GF presence - suppress on stages without GF (e.g. horse)
+        const c = (stageJson && stageJson.characters) ? stageJson.characters : null;
+
+        if (c) {
+            if (this.dad && c.dad) {
+                this.dad.container.position.set(c.dad.position[0], c.dad.position[1]);
+                this.dad.cameraOffsets = c.dad.cameraOffsets || [150, -100];
+            }
+            if (this.bf && c.bf) {
+                this.bf.container.position.set(c.bf.position[0], c.bf.position[1]);
+                this.bf.cameraOffsets = c.bf.cameraOffsets || [-100, -100];
+            }
             if (this.gf) {
                 if (c.gf && c.gf.position) {
                     this.gf.container.position.set(c.gf.position[0], c.gf.position[1]);
+                    if (c.gf.scale) this.gf.container.scale.set(c.gf.scale);
                     this.gf.container.visible = true;
                 } else {
                     this.gf.container.visible = false;
                 }
             }
-
-            if (this.dad && c.dad) this.dad.container.position.set(c.dad.position[0], c.dad.position[1]);
-            if (this.bf && c.bf) this.bf.container.position.set(c.bf.position[0], c.bf.position[1]);
         } else {
+            if (this.dad) this.dad.container.position.set(303, 861);
+            if (this.bf) this.bf.container.position.set(970, 892);
             if (this.gf) this.gf.container.position.set(604, 424);
-            this.dad.container.position.set(303, 861);
-            this.bf.container.position.set(970, 892);
         }
 
         if (this.gf && this.gf.container.visible) this.worldContainer.addChild(this.gf.container);
-        this.worldContainer.addChild(this.dad.container);
-        this.worldContainer.addChild(this.bf.container);
+        if (this.dad) this.worldContainer.addChild(this.dad.container);
+        if (this.bf) this.worldContainer.addChild(this.bf.container);
 
         this.worldContainer.addChild(this.stageFront);
 
-        // Initial camera centering on Dad
-        this.camTargetX = this.dad.container.position.x + 150;
+        // Center on Opponent to start
+        const dadCam = (this.dad && this.dad.cameraOffsets) ? this.dad.cameraOffsets : [150, -100];
+        this.camTargetX = this.dad.container.position.x + dadCam[0];
+        this.camTargetY = this.dad.container.position.y + dadCam[1];
+        this.camFocusX = this.camTargetX;
+        this.camFocusY = this.camTargetY;
     }
 
     setupStrumlines() {
@@ -378,8 +416,8 @@ class PlayStateScene {
         const receptorY = 85;
         const scrollMult = 0.32 * this.speed;
 
-        this.dad.update(deltaSec);
-        this.bf.update(deltaSec);
+        if (this.dad) this.dad.update(deltaSec);
+        if (this.bf) this.bf.update(deltaSec);
         if (this.gf && this.gf.container.visible) this.gf.update(deltaSec);
 
         // Icon bounce lerp
@@ -388,14 +426,13 @@ class PlayStateScene {
         this.bfIcon.scale.x += (1.0 - this.bfIcon.scale.x) * 0.15;
         this.bfIcon.scale.y += (1.0 - this.bfIcon.scale.y) * 0.15;
 
-        // Dynamic Camera Tracking (Centers around 650, 450)
-        const currentCamX = this.worldContainer.position.x;
-        const targetX = 640 - (this.camTargetX - 650) * this.camZoom;
-        this.worldContainer.position.x += (targetX - currentCamX) * 0.05;
-
+        // V-SLICE TRUE CAMERA LERP (Centers target on screen)
+        this.camFocusX += (this.camTargetX - this.camFocusX) * 0.05;
+        this.camFocusY += (this.camTargetY - this.camFocusY) * 0.05;
         this.camZoom += (this.baseZoom - this.camZoom) * 0.08;
+
         this.worldContainer.scale.set(this.camZoom);
-        this.worldContainer.pivot.set(650, 450);
+        this.worldContainer.pivot.set(this.camFocusX, this.camFocusY);
         this.worldContainer.position.set(640, 360);
 
         this.receptors.forEach(r => {
@@ -417,8 +454,12 @@ class PlayStateScene {
                 this.hitReceptor(n.dir, false);
 
                 const anims = ['left', 'down', 'up', 'right'];
-                this.dad.playAnim(anims[n.dir], true);
-                this.camTargetX = this.dad.container.position.x + 150;
+                if (this.dad) {
+                    this.dad.playAnim(anims[n.dir], true);
+                    const dadCam = this.dad.cameraOffsets || [150, -100];
+                    this.camTargetX = this.dad.container.position.x + dadCam[0];
+                    this.camTargetY = this.dad.container.position.y + dadCam[1];
+                }
                 continue;
             }
 
@@ -437,7 +478,7 @@ class PlayStateScene {
                 this.updateHealthBar();
 
                 const missAnims = ['singleftmiss', 'singdownmiss', 'singupmiss', 'singrightmiss'];
-                this.bf.playAnim(missAnims[n.dir] || 'singleftmiss', true);
+                if (this.bf) this.bf.playAnim(missAnims[n.dir] || 'singleftmiss', true);
                 continue;
             }
 
@@ -479,8 +520,12 @@ class PlayStateScene {
         this.hitReceptor(dir, true);
         
         const anims = ['left', 'down', 'up', 'right'];
-        this.bf.playAnim(anims[dir], true);
-        this.camTargetX = this.bf.container.position.x - 100;
+        if (this.bf) {
+            this.bf.playAnim(anims[dir], true);
+            const bfCam = this.bf.cameraOffsets || [-100, -100];
+            this.camTargetX = this.bf.container.position.x + bfCam[0];
+            this.camTargetY = this.bf.container.position.y + bfCam[1];
+        }
 
         let closest = null;
         let minDiff = Infinity;
@@ -556,18 +601,24 @@ function onStepHit(step) {
             playState.discussSprite.alpha = 0;
         }
         if (step === 805) {
-            playState.bf.playAnim('lock in', true);
-            playState.bf.holdTimer = 1.5; // Lock anim from being stomped
+            if (playState.bf) {
+                playState.bf.playAnim('lock in', true);
+                playState.bf.holdTimer = 1.5;
+            }
         }
         if (step === 812) {
-            playState.bf.playAnim('cock', true);
-            playState.bf.holdTimer = 1.0;
-            playState.dad.playAnim('right', true);
+            if (playState.bf) {
+                playState.bf.playAnim('cock', true);
+                playState.bf.holdTimer = 1.0;
+            }
+            if (playState.dad) playState.dad.playAnim('right', true);
         }
         if (step === 816) {
-            playState.bf.playAnim('blast', true);
-            playState.bf.holdTimer = 1.2;
-            playState.camZoom = playState.baseZoom + 0.08; // Flash punch
+            if (playState.bf) {
+                playState.bf.playAnim('blast', true);
+                playState.bf.holdTimer = 1.2;
+            }
+            playState.camZoom = playState.baseZoom + 0.08;
         }
     }
 }
@@ -599,8 +650,8 @@ function onBeatHit(beat) {
         }
     });
 
-    if (playState.dad.holdTimer <= 0) playState.dad.playAnim('idle');
-    if (playState.bf.holdTimer <= 0) playState.bf.playAnim('idle');
+    if (playState.dad && playState.dad.holdTimer <= 0) playState.dad.playAnim('idle');
+    if (playState.bf && playState.bf.holdTimer <= 0) playState.bf.playAnim('idle');
 
     playState.receptors.forEach(r => {
         r.container.scale.set(1.06);
@@ -643,7 +694,7 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ============================================================================
-// STAGE & PROPS LOADER (DYNAMIC SCANNER FOR ALL .XML PROPS)
+// STAGE & PROPS LOADER
 // ============================================================================
 async function loadAnimatedProp(stageFolder, propName) {
     let pngEntry = null;
@@ -743,7 +794,7 @@ async function launchSong(item) {
             }
         }
 
-        // 3. Dynamic Animated Props Detection (Discovers horses, caughthorse, boppers, etc.)
+        // 3. Dynamic Animated Props Detection
         const stageProps = {};
         for (const path of Object.keys(VirtualFS.assets)) {
             if (path.includes(`bg/${stageFolder}/`) && path.endsWith('.xml')) {
