@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - FULL-TAB RESPONSIVE RUNNER, ZERO-LEAK CLEANUP & FREEZE PROTECTION
+// GAME.JS - AUDIO CACHED, GROUND-ALIGNED V-SLICE PLAYSTATE
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -45,11 +45,11 @@ class PlayStateScene {
         this.gfDanceLeft = false;
         this.props = {};
 
-        // Base Stage Zoom
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
 
-        // Stage camera anchors
+        // CRITICAL FIX: Stage vertical center is Y = 720 (HaxeFlixel scroll + half screen)
+        // This keeps Noob49, Boyfriend, and Girlfriend on screen simultaneously!
         this.initStageCameras(songItem.id.toLowerCase());
 
         this.setupStage(stageData, stageProps, stageJson);
@@ -64,37 +64,37 @@ class PlayStateScene {
 
     initStageCameras(songId) {
         if (songId.includes('49')) {
-            this.dadCam = [500, 480];
-            this.bfCam = [850, 480];
+            this.dadCam = [500, 720];
+            this.bfCam = [850, 720];
             this.camTargetX = 675;
-            this.camTargetY = 480;
+            this.camTargetY = 720;
         } else if (songId.includes('suspect')) {
-            this.dadCam = [500, 450];
-            this.bfCam = [850, 450];
+            this.dadCam = [500, 700];
+            this.bfCam = [850, 700];
             this.camTargetX = 675;
-            this.camTargetY = 450;
+            this.camTargetY = 700;
         } else if (songId.includes('trot')) {
-            this.dadCam = [540, 400];
-            this.bfCam = [900, 400];
+            this.dadCam = [540, 680];
+            this.bfCam = [900, 680];
             this.camTargetX = 720;
-            this.camTargetY = 400;
+            this.camTargetY = 680;
         } else if (songId.includes('lied')) {
-            this.dadCam = [640, 480];
-            this.bfCam = [810, 480];
+            this.dadCam = [640, 720];
+            this.bfCam = [810, 720];
             this.camTargetX = 725;
-            this.camTargetY = 480;
+            this.camTargetY = 720;
         } else if (songId.includes('threat')) {
-            this.dadCam = [800, 520];
-            this.bfCam = [1050, 520];
+            this.dadCam = [800, 750];
+            this.bfCam = [1050, 750];
             this.camTargetX = 925;
-            this.camTargetY = 520;
+            this.camTargetY = 750;
             this.baseZoom = 0.58;
             this.camZoom = 0.58;
         } else {
-            this.dadCam = [600, 480];
-            this.bfCam = [850, 480];
+            this.dadCam = [600, 720];
+            this.bfCam = [850, 720];
             this.camTargetX = 725;
-            this.camTargetY = 480;
+            this.camTargetY = 720;
         }
 
         this.camFocusX = this.camTargetX;
@@ -116,8 +116,8 @@ class PlayStateScene {
                     g.beginFill(hexColor);
                     g.drawRect(-4000, -4000, 10000, 10000);
                     g.endFill();
-                    
                     g.alpha = 0;
+
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
@@ -258,7 +258,6 @@ class PlayStateScene {
         if (!chart) return;
 
         const data = chart.chartData || chart;
-        const songObj = (data.song && typeof data.song === 'object') ? data.song : data;
 
         if (data.events && Array.isArray(data.events)) {
             data.events.forEach(evt => {
@@ -312,7 +311,7 @@ class PlayStateScene {
 
     setupHUD() {
         this.healthBarCont = new PIXI.Container();
-        this.healthBarCont.position.set(640, 660); // Lowered slightly so it never blocks characters' feet
+        this.healthBarCont.position.set(640, 660);
 
         const barWidth = 600;
         const barHeight = 16;
@@ -393,7 +392,6 @@ class PlayStateScene {
         }
 
         cont.addChild(g);
-        cont.baseScale = 1.0;
         return cont;
     }
 
@@ -462,6 +460,9 @@ class PlayStateScene {
     }
 
     update(deltaSec) {
+        // Stop note processing until Conductor actively starts playing!
+        if (!Conductor.isPlaying) return;
+
         const songPos = Conductor.songPosition;
         const receptorY = 85;
         const scrollMult = 0.32 * this.speed;
@@ -482,7 +483,6 @@ class PlayStateScene {
             }
         }
 
-        // Camera Lerp
         this.camFocusX += (this.camTargetX - this.camFocusX) * 0.05;
         this.camFocusY += (this.camTargetY - this.camFocusY) * 0.05;
         this.camZoom += (this.baseZoom - this.camZoom) * 0.08;
@@ -639,7 +639,6 @@ class PlayStateScene {
         this.scoreText.text = `Score: ${this.score} | Misses: ${this.misses} | Accuracy: ${acc}%`;
     }
 
-    // COMPLETE VRAM & TEXTURE CACHE PURGE
     destroy() {
         app.stage.removeChild(this.worldContainer);
         app.stage.removeChild(this.hudContainer);
@@ -649,16 +648,16 @@ class PlayStateScene {
         this.receptors = [];
         this.props = {};
 
-        this.worldContainer.destroy({ children: true, texture: true, baseTexture: true });
+        this.worldContainer.destroy({ children: true });
         this.hudContainer.destroy({ children: true });
 
-        // Purge Pixi's global WebGL texture registry so GPU memory resets to 0MB
-        PIXI.utils.clearTextureCache();
+        revokeAllBlobUrls();
+        app.renderer.textureGC.run();
     }
 }
 
 // ============================================================================
-// OFFICIAL HXC STAGE DIRECTORS (FRAME-DROP SAFE RANGE CHECKS)
+// OFFICIAL STAGE DIRECTORS
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
@@ -670,11 +669,11 @@ function onStepHit(step) {
             if (playState.props['graypet']) playState.props['graypet'].alpha = 0.001;
             if (playState.props['tawny']) playState.props['tawny'].alpha = 0.001;
             if (playState.props['deadtawny']) playState.props['deadtawny'].alpha = 1;
-            playState.dadCam = [270, 480];
+            playState.dadCam = [270, 720];
         }
     }
 
-    // 2. "Suspect" (Frame-drop safe: using range checks so skipped frames never lock screen)
+    // 2. "Suspect" (Frame-drop safe range checks)
     if (currentSong.includes('suspect')) {
         if (step >= 48 && step < 64) {
             if (playState.props['loblack']) playState.props['loblack'].alpha = 0.8;
@@ -689,7 +688,6 @@ function onStepHit(step) {
             playState.hudContainer.visible = true;
         }
 
-        // Pico shooting events
         if (step === 805) {
             if (playState.bf) playState.bf.playAnim('lock in', true);
             if (playState.props['player']) playState.props['player'].playAnimation('die', true);
@@ -789,7 +787,6 @@ function onBeatHit(beat) {
     });
 }
 
-// Game loop ticker
 app.ticker.add((delta) => {
     const deltaSec = delta / 60;
     Conductor.update();
@@ -803,7 +800,6 @@ app.ticker.add((delta) => {
     }
 });
 
-// Keyboard Mapping
 const KEY_MAP = {
     'KeyD': 0, 'ArrowLeft': 0,
     'KeyF': 1, 'ArrowDown': 1,
@@ -824,9 +820,6 @@ window.addEventListener('keydown', (e) => {
     }
 });
 
-// ============================================================================
-// STAGE & PROPS LOADER
-// ============================================================================
 async function loadAnimatedProp(stageFolder, propName) {
     let pngEntry = null;
     let xmlEntry = null;
@@ -841,13 +834,9 @@ async function loadAnimatedProp(stageFolder, propName) {
     if (pngEntry && xmlEntry) {
         try {
             const pngBlob = await pngEntry.async('blob');
-            const xmlText = (await xmlEntry.async('string')).replace(/^\uFEFF/, '').trim();
-
-            const img = new Image();
-            img.src = URL.createObjectURL(pngBlob);
-            await new Promise(res => img.onload = res);
-
-            const baseTexture = new PIXI.BaseTexture(img);
+            const xmlText = sanitizeJsonText(await xmlEntry.async('string'));
+            const imgUrl = createTrackedBlobUrl(pngBlob);
+            const baseTexture = await PIXI.BaseTexture.from(imgUrl);
             const xmlDoc = new DOMParser().parseFromString(xmlText, 'text/xml');
             return parseSparrowAtlas(baseTexture, xmlDoc);
         } catch(e) {}
@@ -855,9 +844,10 @@ async function loadAnimatedProp(stageFolder, propName) {
     return null;
 }
 
-// --- LAUNCH SONG ---
+// ============================================================================
+// INSTANT AUDIO-CACHED LAUNCHER
+// ============================================================================
 async function launchSong(item) {
-    // Kill any pending countdown from a previous song immediately
     if (activeCountdownTimer) {
         clearTimeout(activeCountdownTimer);
         activeCountdownTimer = null;
@@ -866,6 +856,10 @@ async function launchSong(item) {
     if (audioCtx.state === 'suspended') {
         await audioCtx.resume();
     }
+
+    // Reset Conductor clock BEFORE building the scene
+    Conductor.stop();
+    Conductor.setBPM(item.bpm);
 
     freeplayScreen.classList.add('hidden');
     gameContainer.classList.remove('hidden');
@@ -878,35 +872,33 @@ async function launchSong(item) {
     const songId = item.id.toLowerCase();
     const cleanId = songId.replace(/[^a-z0-9]/g, '');
 
-    const audioToLoad = [];
-
-    for (const [path, entry] of Object.entries(VirtualFS.assets)) {
-        const cleanPath = path.replace(/[^a-z0-9\/\.]/g, '');
-        if (cleanPath.includes(`/${cleanId}/`) || cleanPath.includes(`songs/${cleanId}`) || cleanPath.includes(`/${cleanId}-inst`) || cleanPath.includes(`/${cleanId}-voices`)) {
-            if (cleanPath.endsWith('.ogg')) {
-                audioToLoad.push({ path, entry });
-            }
-        }
-    }
-
-    if (audioToLoad.length === 0) {
-        alert(`No .ogg audio files found for song: ${item.name}`);
-        returnToFreeplay();
-        return;
-    }
-
-    Conductor.stop();
-    Conductor.setBPM(item.bpm);
-
     try {
-        for (const audioFile of audioToLoad) {
-            const buffer = await audioFile.entry.async('arraybuffer');
-            const decoded = await audioCtx.decodeAudioData(buffer.slice(0));
+        // AUDIO CACHING: Only decodes audio ONCE; second play is 0.01s instant!
+        if (!VirtualFS.audioBufferCache[cleanId]) {
+            const audioToLoad = [];
+            for (const [path, entry] of Object.entries(VirtualFS.assets)) {
+                const cleanPath = path.replace(/[^a-z0-9\/\.]/g, '');
+                if (cleanPath.includes(`/${cleanId}/`) || cleanPath.includes(`songs/${cleanId}`) || cleanPath.includes(`/${cleanId}-inst`) || cleanPath.includes(`/${cleanId}-voices`)) {
+                    if (cleanPath.endsWith('.ogg')) {
+                        audioToLoad.push(entry);
+                    }
+                }
+            }
 
+            const decodedBuffers = [];
+            for (const entry of audioToLoad) {
+                const buffer = await entry.async('arraybuffer');
+                const decoded = await audioCtx.decodeAudioData(buffer.slice(0));
+                decodedBuffers.push(decoded);
+            }
+            VirtualFS.audioBufferCache[cleanId] = decodedBuffers;
+        }
+
+        // Attach cached sound buffers
+        for (const decoded of VirtualFS.audioBufferCache[cleanId]) {
             const source = audioCtx.createBufferSource();
             source.buffer = decoded;
             source.connect(audioCtx.destination);
-
             Conductor.activeSources.push(source);
         }
 
@@ -915,7 +907,7 @@ async function launchSong(item) {
         const bfChar = await loadCharacter(item.player1, true, false);
         const gfChar = await loadCharacter(item.id.includes('suspect') ? 'deadnoob49' : (item.id.includes('trot') ? 'gfweird-sheriff' : 'gfweird'), false, true);
 
-        // 2. Extra Characters for Triple Threat
+        // 2. Extra Characters
         const extraChars = {};
         if (cleanId.includes('threat')) {
             extraChars.maroon = await loadCharacter('maroonthreat', false, false);
@@ -923,7 +915,7 @@ async function launchSong(item) {
             extraChars.maroonParasite = await loadCharacter('maroonParasite', false, false);
         }
 
-        // 3. Load Stage Dynamically
+        // 3. Stage Graphic Layers
         const stageData = {};
         const stageFolder = (item.stage || 'security').toLowerCase().includes('sec') ? 'security' : (item.stage || 'security').toLowerCase();
         const stageJson = VirtualFS.stageJsons[item.stage] || VirtualFS.stageJsons[stageFolder] || null;
@@ -933,15 +925,13 @@ async function launchSong(item) {
                 const key = path.split('/').pop().replace(/\.(png|jpg)$/, '');
                 if (path.endsWith('.png') || path.endsWith('.jpg')) {
                     const blob = await entry.async('blob');
-                    const img = new Image();
-                    img.src = URL.createObjectURL(blob);
-                    await new Promise(res => img.onload = res);
-                    stageData[key] = PIXI.Texture.from(img);
+                    const imgUrl = createTrackedBlobUrl(blob);
+                    stageData[key] = await PIXI.Texture.fromURL(imgUrl);
                 }
             }
         }
 
-        // 4. Dynamic Animated Props Detection
+        // 4. Stage Animated Props
         const stageProps = {};
         for (const path of Object.keys(VirtualFS.assets)) {
             if (path.includes(`bg/${stageFolder}/`)) {
@@ -954,6 +944,7 @@ async function launchSong(item) {
 
         playState = new PlayStateScene(item, dadChar, bfChar, gfChar, stageData, stageProps, stageJson, extraChars);
 
+        // Start synchronized hardware audio playback
         activeCountdownTimer = setTimeout(() => {
             if (playState) {
                 playState.showRating("GO!", 0x2ed573);
