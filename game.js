@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - OFFICIAL HSCRIPT-ALIGNED ENGINE (ALL 5 DLC SONGS & CUTSCENES)
+// GAME.JS - FULL-TAB RESPONSIVE RUNNER, ZERO-LEAK CLEANUP & FREEZE PROTECTION
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -17,6 +17,7 @@ function drawArrowShape(graphics, color, size = 32) {
 }
 
 let playState = null;
+let activeCountdownTimer = null;
 
 class PlayStateScene {
     constructor(songItem, dadChar, bfChar, gfChar, stageData, stageProps, stageJson, extraChars = {}) {
@@ -29,7 +30,7 @@ class PlayStateScene {
         this.dad = dadChar;
         this.bf = bfChar;
         this.gf = gfChar;
-        this.extraChars = extraChars; // maroon, maroonParasite, grey
+        this.extraChars = extraChars;
 
         this.notes = [];
         this.events = [];
@@ -48,7 +49,7 @@ class PlayStateScene {
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
 
-        // Official Stage Camera Anchors from HXC scripts!
+        // Stage camera anchors
         this.initStageCameras(songItem.id.toLowerCase());
 
         this.setupStage(stageData, stageProps, stageJson);
@@ -63,37 +64,37 @@ class PlayStateScene {
 
     initStageCameras(songId) {
         if (songId.includes('49')) {
+            this.dadCam = [500, 480];
+            this.bfCam = [850, 480];
+            this.camTargetX = 675;
+            this.camTargetY = 480;
+        } else if (songId.includes('suspect')) {
             this.dadCam = [500, 450];
             this.bfCam = [850, 450];
-            this.camTargetX = 800;
-            this.camTargetY = 450;
-        } else if (songId.includes('suspect')) {
-            this.dadCam = [650, 450];
-            this.bfCam = [700, 450];
-            this.camTargetX = 800;
+            this.camTargetX = 675;
             this.camTargetY = 450;
         } else if (songId.includes('trot')) {
-            this.dadCam = [540, 380];
-            this.bfCam = [900, 380];
-            this.camTargetX = 900;
-            this.camTargetY = 380;
+            this.dadCam = [540, 400];
+            this.bfCam = [900, 400];
+            this.camTargetX = 720;
+            this.camTargetY = 400;
         } else if (songId.includes('lied')) {
-            this.dadCam = [640, 450];
-            this.bfCam = [810, 450];
-            this.camTargetX = 800;
-            this.camTargetY = 450;
-        } else if (songId.includes('threat')) {
-            this.dadCam = [950, 550];
-            this.bfCam = [950, 550];
-            this.camTargetX = 1100;
-            this.camTargetY = 550;
-            this.baseZoom = 0.55;
-            this.camZoom = 0.55;
-        } else {
-            this.dadCam = [600, 450];
-            this.bfCam = [850, 450];
+            this.dadCam = [640, 480];
+            this.bfCam = [810, 480];
             this.camTargetX = 725;
-            this.camTargetY = 450;
+            this.camTargetY = 480;
+        } else if (songId.includes('threat')) {
+            this.dadCam = [800, 520];
+            this.bfCam = [1050, 520];
+            this.camTargetX = 925;
+            this.camTargetY = 520;
+            this.baseZoom = 0.58;
+            this.camZoom = 0.58;
+        } else {
+            this.dadCam = [600, 480];
+            this.bfCam = [850, 480];
+            this.camTargetX = 725;
+            this.camTargetY = 480;
         }
 
         this.camFocusX = this.camTargetX;
@@ -109,7 +110,6 @@ class PlayStateScene {
                 const cleanName = p.assetPath.split('/').pop().toLowerCase();
                 const tex = stageData[cleanName];
 
-                // 1. Color Overlays (#000000, #FF0000)
                 if (p.assetPath && p.assetPath.startsWith('#')) {
                     const g = new PIXI.Graphics();
                     const hexColor = parseInt(p.assetPath.replace('#', '0x'), 16) || 0x000000;
@@ -117,7 +117,7 @@ class PlayStateScene {
                     g.drawRect(-4000, -4000, 10000, 10000);
                     g.endFill();
                     
-                    g.alpha = 0; // Starts hidden; driven by HXC events
+                    g.alpha = 0;
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
@@ -131,7 +131,6 @@ class PlayStateScene {
                     return;
                 }
 
-                // 2. Animated XML Props
                 if (stageProps[cleanName]) {
                     const animTextures = Object.values(stageProps[cleanName])[0];
                     const aSpr = new PIXI.AnimatedSprite(animTextures);
@@ -147,9 +146,7 @@ class PlayStateScene {
                     const propName = p.name ? p.name.toLowerCase() : cleanName;
                     this.props[propName] = aSpr;
                     this.props[cleanName] = aSpr;
-                }
-                // 3. Static Props
-                else if (tex) {
+                } else if (tex) {
                     const spr = new PIXI.Sprite(tex);
                     spr.position.set(p.position[0], p.position[1]);
                     
@@ -176,11 +173,6 @@ class PlayStateScene {
 
             this.stageBack.sortChildren();
             this.stageFront.sortChildren();
-        } else if (stageData && stageData.wall) {
-            const wall = new PIXI.Sprite(stageData.wall);
-            wall.anchor.set(0.5);
-            wall.position.set(640, 360);
-            this.stageBack.addChild(wall);
         }
 
         this.worldContainer.addChild(this.stageBack);
@@ -212,19 +204,18 @@ class PlayStateScene {
         if (this.dad) this.worldContainer.addChild(this.dad.container);
         if (this.bf) this.worldContainer.addChild(this.bf.container);
 
-        // Triple Threat Extra Characters (Maroon, Grey, Maroon Parasite)
         if (this.extraChars.maroon) {
-            this.extraChars.maroon.container.position.set(-950, 530);
+            this.extraChars.maroon.container.position.set(dadPos[0] - 150, dadPos[1]);
             this.extraChars.maroon.container.visible = false;
             this.worldContainer.addChild(this.extraChars.maroon.container);
         }
         if (this.extraChars.grey) {
-            this.extraChars.grey.container.position.set(-700, 600);
+            this.extraChars.grey.container.position.set(dadPos[0] - 300, dadPos[1]);
             this.extraChars.grey.container.visible = false;
             this.worldContainer.addChild(this.extraChars.grey.container);
         }
         if (this.extraChars.maroonParasite) {
-            this.extraChars.maroonParasite.container.position.set(-350, 240);
+            this.extraChars.maroonParasite.container.position.set(dadPos[0] - 180, dadPos[1]);
             this.extraChars.maroonParasite.container.visible = false;
             this.worldContainer.addChild(this.extraChars.maroonParasite.container);
         }
@@ -269,7 +260,6 @@ class PlayStateScene {
         const data = chart.chartData || chart;
         const songObj = (data.song && typeof data.song === 'object') ? data.song : data;
 
-        // 1. Chart Events
         if (data.events && Array.isArray(data.events)) {
             data.events.forEach(evt => {
                 if (evt.t !== undefined) {
@@ -284,7 +274,6 @@ class PlayStateScene {
             this.events.sort((a, b) => a.time - b.time);
         }
 
-        // 2. V-Slice Notes
         if (data.notes && typeof data.notes === 'object' && !Array.isArray(data.notes)) {
             const diffNotes = data.notes.hard || data.notes.normal || data.notes.default || Object.values(data.notes)[0];
             if (Array.isArray(diffNotes)) {
@@ -323,7 +312,7 @@ class PlayStateScene {
 
     setupHUD() {
         this.healthBarCont = new PIXI.Container();
-        this.healthBarCont.position.set(640, 645);
+        this.healthBarCont.position.set(640, 660); // Lowered slightly so it never blocks characters' feet
 
         const barWidth = 600;
         const barHeight = 16;
@@ -355,7 +344,7 @@ class PlayStateScene {
             align: 'center'
         });
         this.scoreText.anchor.set(0.5);
-        this.scoreText.position.set(640, 678);
+        this.scoreText.position.set(640, 690);
         this.hudContainer.addChild(this.scoreText);
 
         this.ratingText = new PIXI.Text('READY!', {
@@ -428,7 +417,6 @@ class PlayStateScene {
         this.bfIcon.position.set(splitX + 35, 0);
     }
 
-    // Dynamic Chart Event Handler (FocusCamera, ZoomCamera, ChangeCharacter, ChangeSuffix, ReactorBeep)
     triggerEvent(e) {
         const name = e.name;
         const val = e.val || {};
@@ -482,12 +470,10 @@ class PlayStateScene {
         if (this.bf) this.bf.update(deltaSec);
         if (this.gf && this.gf.container.visible) this.gf.update(deltaSec);
 
-        // Update Triple Threat extra characters
         if (this.extraChars.maroon && this.extraChars.maroon.container.visible) this.extraChars.maroon.update(deltaSec);
         if (this.extraChars.grey && this.extraChars.grey.container.visible) this.extraChars.grey.update(deltaSec);
         if (this.extraChars.maroonParasite && this.extraChars.maroonParasite.container.visible) this.extraChars.maroonParasite.update(deltaSec);
 
-        // Process Chart Events
         for (let i = 0; i < this.events.length; i++) {
             const e = this.events[i];
             if (!e.fired && songPos >= e.time) {
@@ -526,7 +512,6 @@ class PlayStateScene {
                 const anims = ['left', 'down', 'up', 'right'];
                 const animToPlay = anims[n.dir];
 
-                // Triple Threat Note Delegation!
                 if (n.kind === 'maroon' && this.extraChars.maroon && this.extraChars.maroon.container.visible) {
                     this.extraChars.maroon.playAnim(animToPlay, true);
                 } else if (n.kind === 'grey' && this.extraChars.grey && this.extraChars.grey.container.visible) {
@@ -654,54 +639,57 @@ class PlayStateScene {
         this.scoreText.text = `Score: ${this.score} | Misses: ${this.misses} | Accuracy: ${acc}%`;
     }
 
+    // COMPLETE VRAM & TEXTURE CACHE PURGE
     destroy() {
         app.stage.removeChild(this.worldContainer);
         app.stage.removeChild(this.hudContainer);
+
+        this.notes = [];
+        this.events = [];
+        this.receptors = [];
+        this.props = {};
+
         this.worldContainer.destroy({ children: true, texture: true, baseTexture: true });
         this.hudContainer.destroy({ children: true });
+
+        // Purge Pixi's global WebGL texture registry so GPU memory resets to 0MB
+        PIXI.utils.clearTextureCache();
     }
 }
 
 // ============================================================================
-// OFFICIAL HXC STAGE DIRECTORS (100% SCRIPT-ACCURATE CHOREOGRAPHY)
+// OFFICIAL HXC STAGE DIRECTORS (FRAME-DROP SAFE RANGE CHECKS)
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // 1. "49" (security.hxc)
+    // 1. "49"
     if (currentSong.includes('49')) {
-        if (step === 993) {
+        if (step >= 993) {
             if (playState.props['graypet']) playState.props['graypet'].alpha = 0.001;
             if (playState.props['tawny']) playState.props['tawny'].alpha = 0.001;
             if (playState.props['deadtawny']) playState.props['deadtawny'].alpha = 1;
-            playState.dadCam = [270, 450];
+            playState.dadCam = [270, 480];
         }
     }
 
-    // 2. "Suspect" (security2.hxc)
+    // 2. "Suspect" (Frame-drop safe: using range checks so skipped frames never lock screen)
     if (currentSong.includes('suspect')) {
-        if (step === 48) {
-            if (playState.props['loblack']) playState.props['loblack'].alpha = 1;
+        if (step >= 48 && step < 64) {
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 0.8;
             playState.hudContainer.visible = false;
         }
-        if (step === 60) {
+        if (step >= 60 && step < 64) {
             if (playState.props['discuss']) playState.props['discuss'].alpha = 1;
         }
-        if (step === 64) {
+        if (step >= 64) {
             if (playState.props['discuss']) playState.props['discuss'].alpha = 0;
             if (playState.props['loblack']) playState.props['loblack'].alpha = 0;
             playState.hudContainer.visible = true;
-            playState.baseZoom = 0.75;
         }
-        if (step === 448 || step === 464 || step === 480) { // detective cuts
-            playState.camTargetX = 500;
-            playState.camTargetY = 450;
-        }
-        if (step === 460 || step === 476 || step === 492) { // pico cuts
-            playState.camTargetX = 850;
-            playState.camTargetY = 450;
-        }
+
+        // Pico shooting events
         if (step === 805) {
             if (playState.bf) playState.bf.playAnim('lock in', true);
             if (playState.props['player']) playState.props['player'].playAnimation('die', true);
@@ -716,27 +704,26 @@ function onStepHit(step) {
         }
     }
 
-    // 3. "Trot Away" (horse.hxc)
+    // 3. "Trot Away"
     if (currentSong.includes('trot')) {
-        if (step === 840) { // Lights out & stampede starts!
+        if (step >= 840 && step < 1096) {
             if (playState.props['subtract']) playState.props['subtract'].alpha = 0.5;
-            if (playState.props['horse1']) playState.props['horse1'].position.x += 10;
         }
-        if (step === 1096) { // Caught horse appears!
+        if (step >= 1096) {
             if (playState.props['caught']) playState.props['caught'].alpha = 1;
             if (playState.props['subtract']) playState.props['subtract'].alpha = 0.11;
         }
     }
 
-    // 4. "Don't Lied" (medbay.hxc)
+    // 4. "Don't Lied"
     if (currentSong.includes('lied')) {
-        if (step === 1184) {
-            if (playState.props['loblack']) playState.props['loblack'].alpha = 1;
+        if (step >= 1184 && step < 1376) {
+            if (playState.props['loblack']) playState.props['loblack'].alpha = 0.8;
         }
         if (step === 1232) {
-            if (playState.dad) playState.dad.container.position.x = 690; // Steps forward!
+            if (playState.dad) playState.dad.container.position.x = 690;
         }
-        if (step === 1376) {
+        if (step >= 1376) {
             if (playState.props['loblack']) playState.props['loblack'].alpha = 0;
         }
         if (step === 1394) {
@@ -751,29 +738,17 @@ function onStepHit(step) {
         }
     }
 
-    // 5. "Triple Threat" (beach.hxc)
+    // 5. "Triple Threat"
     if (currentSong.includes('threat')) {
-        if (step === 240) { // Maroon enters!
-            if (playState.extraChars.maroon) {
-                playState.extraChars.maroon.container.visible = true;
-                playState.extraChars.maroon.container.position.x = playState.dad.container.position.x - 150;
-            }
-            if (playState.dad) {
-                playState.dad.playAnim('wow', true);
-                playState.dad.container.position.x += 150;
-            }
+        if (step >= 240) {
+            if (playState.extraChars.maroon) playState.extraChars.maroon.container.visible = true;
         }
-        if (step === 690) { // Grey enters!
-            if (playState.extraChars.grey) {
-                playState.extraChars.grey.container.visible = true;
-            }
+        if (step >= 690) {
+            if (playState.extraChars.grey) playState.extraChars.grey.container.visible = true;
         }
-        if (step === 1320) { // Maroon turns into parasite!
+        if (step >= 1320) {
             if (playState.extraChars.maroon) playState.extraChars.maroon.container.visible = false;
-            if (playState.extraChars.maroonParasite) {
-                playState.extraChars.maroonParasite.container.visible = true;
-                playState.extraChars.maroonParasite.container.position.x = playState.dad.container.position.x - 180;
-            }
+            if (playState.extraChars.maroonParasite) playState.extraChars.maroonParasite.container.visible = true;
         }
     }
 }
@@ -782,7 +757,6 @@ function onBeatHit(beat) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // Prop beat bopping from security.hxc
     if (currentSong.includes('49')) {
         if (beat % 2 === 0 && playState.props['shit']) playState.props['shit'].gotoAndPlay(0);
         if (beat % 1 === 0) {
@@ -791,7 +765,6 @@ function onBeatHit(beat) {
         }
     }
 
-    // Horse prop bopping
     if (currentSong.includes('trot') && beat % 2 === 0 && playState.props['caught']) {
         playState.props['caught'].gotoAndPlay(0);
     }
@@ -884,6 +857,12 @@ async function loadAnimatedProp(stageFolder, propName) {
 
 // --- LAUNCH SONG ---
 async function launchSong(item) {
+    // Kill any pending countdown from a previous song immediately
+    if (activeCountdownTimer) {
+        clearTimeout(activeCountdownTimer);
+        activeCountdownTimer = null;
+    }
+
     if (audioCtx.state === 'suspended') {
         await audioCtx.resume();
     }
@@ -891,7 +870,10 @@ async function launchSong(item) {
     freeplayScreen.classList.add('hidden');
     gameContainer.classList.remove('hidden');
 
-    if (playState) playState.destroy();
+    if (playState) {
+        playState.destroy();
+        playState = null;
+    }
 
     const songId = item.id.toLowerCase();
     const cleanId = songId.replace(/[^a-z0-9]/g, '');
@@ -972,13 +954,14 @@ async function launchSong(item) {
 
         playState = new PlayStateScene(item, dadChar, bfChar, gfChar, stageData, stageProps, stageJson, extraChars);
 
-        setTimeout(() => {
+        activeCountdownTimer = setTimeout(() => {
             if (playState) {
                 playState.showRating("GO!", 0x2ed573);
                 const playTime = audioCtx.currentTime + 0.05;
                 Conductor.activeSources.forEach(s => s.start(playTime));
                 Conductor.start();
             }
+            activeCountdownTimer = null;
         }, 1500);
 
     } catch(err) {
@@ -989,6 +972,11 @@ async function launchSong(item) {
 }
 
 function returnToFreeplay() {
+    if (activeCountdownTimer) {
+        clearTimeout(activeCountdownTimer);
+        activeCountdownTimer = null;
+    }
+
     Conductor.stop();
     if (playState) {
         playState.destroy();
