@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - PLAYSTATE SCENE, V-SLICE CAMERA ENGINE & STAGE BOUNDS
+// GAME.JS - STAGE CENTERED CAMERA (DAD, GF & BF IN VIEW)
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -43,15 +43,8 @@ class PlayStateScene {
         this.animatedProps = [];
         this.discussSprite = null;
 
-        // V-Slice Camera Zoom
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
-
-        // Dynamic Camera Targets
-        this.camFocusX = 640;
-        this.camFocusY = 360;
-        this.camTargetX = 640;
-        this.camTargetY = 360;
 
         this.setupStage(stageData, stageProps, stageJson);
         this.setupCharacters(stageJson);
@@ -80,8 +73,7 @@ class PlayStateScene {
                     g.drawRect(-3000, -3000, 8000, 8000);
                     g.endFill();
                     
-                    // Critical fix: Black and full-red event tint screens start at alpha: 0
-                    g.alpha = 0;
+                    g.alpha = 0; // Cutscene tints start hidden
                     if (p.blend === 'multiply') g.blendMode = PIXI.BLEND_MODES.MULTIPLY;
                     if (p.blend === 'subtract') g.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') g.blendMode = PIXI.BLEND_MODES.ADD;
@@ -99,8 +91,6 @@ class PlayStateScene {
                     aSpr.position.set(p.position[0], p.position[1]);
                     aSpr.scale.set(p.scale || 1);
                     aSpr.zIndex = p.zIndex || 0;
-
-                    // Respect p.alpha (keeps caughthorse and playerguy hidden until cutscene triggers)
                     aSpr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     aSpr.loop = false;
 
@@ -116,10 +106,9 @@ class PlayStateScene {
                     const spr = new PIXI.Sprite(tex);
                     spr.position.set(p.position[0], p.position[1]);
                     
-                    // Background scale buffer prevents black borders during wide camera zooms
                     const isBackdrop = (cleanName === 'bg' || cleanName === 'sky' || cleanName === 'wall');
                     const propScale = p.scale || 1;
-                    spr.scale.set(isBackdrop ? propScale * 1.15 : propScale);
+                    spr.scale.set(isBackdrop ? propScale * 1.3 : propScale);
 
                     spr.alpha = (p.alpha !== undefined) ? p.alpha : 1;
                     if (p.blend === 'subtract') spr.blendMode = PIXI.BLEND_MODES.SUBTRACT;
@@ -157,11 +146,9 @@ class PlayStateScene {
         if (c) {
             if (this.dad && c.dad) {
                 this.dad.container.position.set(c.dad.position[0], c.dad.position[1]);
-                this.dad.cameraOffsets = c.dad.cameraOffsets || [150, -100];
             }
             if (this.bf && c.bf) {
                 this.bf.container.position.set(c.bf.position[0], c.bf.position[1]);
-                this.bf.cameraOffsets = c.bf.cameraOffsets || [-100, -100];
             }
             if (this.gf) {
                 if (c.gf && c.gf.position) {
@@ -184,12 +171,19 @@ class PlayStateScene {
 
         this.worldContainer.addChild(this.stageFront);
 
-        // Center camera between Dad and BF at song start
-        const dadCam = (this.dad && this.dad.cameraOffsets) ? this.dad.cameraOffsets : [150, -100];
-        this.camTargetX = this.dad.container.position.x + dadCam[0];
-        this.camTargetY = this.dad.container.position.y - 320 + dadCam[1];
-        this.camFocusX = this.camTargetX;
-        this.camFocusY = this.camTargetY;
+        // BALANCED STAGE MIDPOINT: Focuses squarely on the stage center
+        const dadX = this.dad ? this.dad.container.position.x : 300;
+        const bfX = this.bf ? this.bf.container.position.x : 1000;
+        const stageMidX = (dadX + bfX) / 2;
+        const stageMidY = this.gf ? (this.gf.container.position.y - 40) : 500;
+
+        this.stageCenterX = stageMidX;
+        this.stageCenterY = stageMidY;
+
+        this.camTargetX = stageMidX;
+        this.camTargetY = stageMidY;
+        this.camFocusX = stageMidX;
+        this.camFocusY = stageMidY;
     }
 
     setupStrumlines() {
@@ -228,7 +222,6 @@ class PlayStateScene {
         const data = chart.chartData || chart;
         const songObj = (data.song && typeof data.song === 'object') ? data.song : data;
 
-        // V-Slice Notes
         if (data.notes && typeof data.notes === 'object' && !Array.isArray(data.notes)) {
             const diffNotes = data.notes.normal || data.notes.hard || data.notes.default || Object.values(data.notes)[0];
             if (Array.isArray(diffNotes)) {
@@ -245,7 +238,6 @@ class PlayStateScene {
             }
         }
 
-        // Codename strumLines
         const strumLines = data.strumLines || (data.song && data.song.strumLines);
         if (this.notes.length === 0 && Array.isArray(strumLines)) {
             strumLines.forEach((strum, lineIndex) => {
@@ -264,7 +256,6 @@ class PlayStateScene {
             });
         }
 
-        // Psych sections
         if (this.notes.length === 0) {
             let sections = songObj.notes || data.notes || [];
             if (sections && typeof sections === 'object' && !Array.isArray(sections)) {
@@ -453,7 +444,7 @@ class PlayStateScene {
 
             const diff = n.time - songPos;
 
-            // Opponent note hit
+            // Opponent note hit: gentle 80px shift to the left
             if (!n.isPlayer && diff <= 0) {
                 n.hit = true;
                 n.sprite.visible = false;
@@ -463,9 +454,8 @@ class PlayStateScene {
                 const anims = ['left', 'down', 'up', 'right'];
                 if (this.dad) {
                     this.dad.playAnim(anims[n.dir], true);
-                    const dadCam = this.dad.cameraOffsets || [150, -100];
-                    this.camTargetX = this.dad.container.position.x + dadCam[0];
-                    this.camTargetY = this.dad.container.position.y - 320 + dadCam[1];
+                    this.camTargetX = this.stageCenterX - 80;
+                    this.camTargetY = this.stageCenterY;
                 }
                 continue;
             }
@@ -529,9 +519,9 @@ class PlayStateScene {
         const anims = ['left', 'down', 'up', 'right'];
         if (this.bf) {
             this.bf.playAnim(anims[dir], true);
-            const bfCam = this.bf.cameraOffsets || [-100, -100];
-            this.camTargetX = this.bf.container.position.x + bfCam[0];
-            this.camTargetY = this.bf.container.position.y - 320 + bfCam[1];
+            // Player singing: gentle 80px shift to the right
+            this.camTargetX = this.stageCenterX + 80;
+            this.camTargetY = this.stageCenterY;
         }
 
         let closest = null;
@@ -800,9 +790,11 @@ async function launchSong(item) {
         // 3. Dynamic Animated Props Detection
         const stageProps = {};
         for (const path of Object.keys(VirtualFS.assets)) {
-            if (path.includes(`bg/${stageFolder}/`) && path.endsWith('.xml')) {
-                const propKey = path.split('/').pop().replace('.xml', '').toLowerCase();
-                stageProps[propKey] = await loadAnimatedProp(stageFolder, propKey);
+            if (path.includes(`bg/${stageFolder}/`)) {
+                if (path.endsWith('.xml')) {
+                    const propKey = path.split('/').pop().replace('.xml', '').toLowerCase();
+                    stageProps[propKey] = await loadAnimatedProp(stageFolder, propKey);
+                }
             }
         }
 
