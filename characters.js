@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (MASTER TIMELINE ATLAS + SPARROW)
+// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (CORRECT FACING & TIMELINE ATLAS)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE (SUPPORTS TIMELINE LABELS + SYMBOL MODES)
+// 2. DYNAMIC TEXTURE ATLAS ENGINE
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -158,17 +158,6 @@ class DynamicAtlasCharacter {
 
         // 4. Scan Symbols for Direct Animation Names (Boyfriend / Pico style)
         this.symbolAnims = {};
-        const rootMatrices = {};
-        for (const layer of this.masterLayers) {
-            for (const fr of layer.FR || []) {
-                for (const el of fr.E || []) {
-                    if (el.SI && el.SI.SN) {
-                        rootMatrices[el.SI.SN] = extractMatrix(el.SI);
-                    }
-                }
-            }
-        }
-
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
             const assign = (key) => {
@@ -191,7 +180,6 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // Determine Primary Mode
         this.hasTimelineLabels = Object.keys(this.timelineAnims).length > 0;
         this.currentAnim = this.isGF ? 'idleleft' : 'idle';
         this.frame = 0;
@@ -199,9 +187,9 @@ class DynamicAtlasCharacter {
         this.holdTimer = 0;
         this.fps = 24;
 
-        // V-Slice native scale & facing direction
+        // FIXED: Do not invert opponents! Both opponents and players are exported with native orientation
         const scale = 1.0;
-        this.container.scale.set(this.isPlayer ? scale : (this.isGF ? scale : -scale), scale);
+        this.container.scale.set(scale, scale);
 
         this.playAnim(this.currentAnim, true);
     }
@@ -253,7 +241,6 @@ class DynamicAtlasCharacter {
             const sym = self.symbols[symName];
             if (!sym || !sym.TL || !sym.TL.L) return;
 
-            // Reverse layer traversal draws background limbs behind foreground
             for (let l = sym.TL.L.length - 1; l >= 0; l--) {
                 const layer = sym.TL.L[l];
                 if (!layer.FR || layer.FR.length === 0) continue;
@@ -314,7 +301,6 @@ class DynamicAtlasCharacter {
 
                 for (const el of activeFR.E) {
                     const baseMat = new PIXI.Matrix();
-                    baseMat.translate(-200, -320); // Center on feet
 
                     if (el.ASI) {
                         const tex = this.spritemap[el.ASI.N];
@@ -487,8 +473,8 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
 
     for (const [path, entry] of Object.entries(VirtualFS.assets)) {
         if (!path.includes('/dialogue/') && !path.includes('/cutscene/')) {
-            if (path.endsWith(`${clean}.png`)) pngEntry = entry;
-            if (path.endsWith(`${clean}.xml`)) xmlEntry = entry;
+            if (path.endsWith(`${clean}.png`) || path.includes(`characters/dlc/${clean}/${clean}.png`)) pngEntry = entry;
+            if (path.endsWith(`${clean}.xml`) || path.includes(`characters/dlc/${clean}/${clean}.xml`)) xmlEntry = entry;
         }
     }
 
