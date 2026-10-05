@@ -1,5 +1,5 @@
 // ============================================================================
-// GAME.JS - TRUE 1080P ROOM FRAMING (GROUNDS ROOM & STABILIZES CAMERA)
+// GAME.JS - OFFICIAL HSCRIPT-ALIGNED CAMERA & STAGE DIRECTOR
 // ============================================================================
 
 const NOTE_COLORS = [0xc24b99, 0x00ffff, 0x12fa05, 0xf9393f]; 
@@ -40,12 +40,19 @@ class PlayStateScene {
         this.health = 1.0;
 
         this.gfDanceLeft = false;
-        this.animatedProps = [];
+        this.animatedProps = {};
         this.discussSprite = null;
 
         // V-Slice Camera Zoom
         this.camZoom = (stageJson && stageJson.cameraZoom) ? stageJson.cameraZoom : 0.7;
         this.baseZoom = this.camZoom;
+
+        // Official HScript Camera Coordinates from security.hxc!
+        // Dad Camera = [500, 450], BF Camera = [850, 450]
+        this.camTargetX = 800;
+        this.camTargetY = 450;
+        this.camFocusX = 800;
+        this.camFocusY = 450;
 
         this.setupStage(stageData, stageProps, stageJson);
         this.setupCharacters(stageJson);
@@ -97,10 +104,9 @@ class PlayStateScene {
 
                     this.stageBack.addChild(aSpr);
 
-                    this.animatedProps.push({
-                        sprite: aSpr,
-                        bopInterval: (cleanName === 'shit' || cleanName.includes('bopper2')) ? 2 : 1
-                    });
+                    const propName = p.name ? p.name.toLowerCase() : cleanName;
+                    this.animatedProps[propName] = aSpr;
+                    this.animatedProps[cleanName] = aSpr;
                 }
                 // 3. Static Props
                 else if (tex) {
@@ -115,6 +121,9 @@ class PlayStateScene {
                     if (p.blend === 'subtract') spr.blendMode = PIXI.BLEND_MODES.SUBTRACT;
                     if (p.blend === 'add') spr.blendMode = PIXI.BLEND_MODES.ADD;
                     spr.zIndex = p.zIndex || 0;
+
+                    const propName = p.name ? p.name.toLowerCase() : cleanName;
+                    this.animatedProps[propName] = spr;
 
                     if (cleanName === 'discuss') {
                         this.discussSprite = spr;
@@ -160,10 +169,6 @@ class PlayStateScene {
                     this.gf.container.visible = false;
                 }
             }
-        } else {
-            if (this.dad) this.dad.container.position.set(303, 861);
-            if (this.bf) this.bf.container.position.set(970, 892);
-            if (this.gf) this.gf.container.position.set(604, 424);
         }
 
         if (this.gf && this.gf.container.visible) this.worldContainer.addChild(this.gf.container);
@@ -172,19 +177,11 @@ class PlayStateScene {
 
         this.worldContainer.addChild(this.stageFront);
 
-        // TRUE ROOM CENTER: Y = 460 brings the entire room down to the floor
-        const dadX = this.dad ? this.dad.container.position.x : 300;
-        const bfX = this.bf ? this.bf.container.position.x : 1000;
-        const stageMidX = (dadX + bfX) / 2;
-        const stageMidY = 460; // Natural 1080p vertical center
-
-        this.stageCenterX = stageMidX;
-        this.stageCenterY = stageMidY;
-
-        this.camTargetX = stageMidX;
-        this.camTargetY = stageMidY;
-        this.camFocusX = stageMidX;
-        this.camFocusY = stageMidY;
+        // Security.hxc standard start: camera centers at (800, 450)
+        this.camTargetX = 800;
+        this.camTargetY = 450;
+        this.camFocusX = 800;
+        this.camFocusY = 450;
     }
 
     setupStrumlines() {
@@ -445,7 +442,7 @@ class PlayStateScene {
 
             const diff = n.time - songPos;
 
-            // Opponent note hit: gentle 80px shift to the left
+            // Opponent Turn Camera Switch: Uses LegacyUtils.camSpecialThing([500, 450])
             if (!n.isPlayer && diff <= 0) {
                 n.hit = true;
                 n.sprite.visible = false;
@@ -455,8 +452,8 @@ class PlayStateScene {
                 const anims = ['left', 'down', 'up', 'right'];
                 if (this.dad) {
                     this.dad.playAnim(anims[n.dir], true);
-                    this.camTargetX = this.stageCenterX - 80;
-                    this.camTargetY = this.stageCenterY;
+                    this.camTargetX = 500;
+                    this.camTargetY = 450;
                 }
                 continue;
             }
@@ -520,8 +517,9 @@ class PlayStateScene {
         const anims = ['left', 'down', 'up', 'right'];
         if (this.bf) {
             this.bf.playAnim(anims[dir], true);
-            this.camTargetX = this.stageCenterX + 80;
-            this.camTargetY = this.stageCenterY;
+            // Player Turn Camera Switch: Uses LegacyUtils.camSpecialThing([850, 450])
+            this.camTargetX = 850;
+            this.camTargetY = 450;
         }
 
         let closest = null;
@@ -583,13 +581,24 @@ class PlayStateScene {
 }
 
 // ============================================================================
-// SCRIPTED MOMENTS
+// SCRIPTED MOMENTS (TRANSLATED DIRECTLY FROM SECURITY.HXC & SECURITY2.HXC)
 // ============================================================================
 function onStepHit(step) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
-    // Song 2: "Suspect" scripted events
+    // 1. Script Director for "49" (security.hxc)
+    if (currentSong.includes('49')) {
+        if (step === 993) {
+            if (playState.animatedProps['graypet']) playState.animatedProps['graypet'].alpha = 0.001;
+            if (playState.animatedProps['tawny']) playState.animatedProps['tawny'].alpha = 0.001;
+            if (playState.animatedProps['deadtawny']) playState.animatedProps['deadtawny'].alpha = 1;
+            playState.camTargetX = 270;
+            playState.camTargetY = 450;
+        }
+    }
+
+    // 2. Script Director for "Suspect" (security2.hxc)
     if (currentSong.includes('suspect')) {
         if (step === 60 && playState.discussSprite) {
             playState.discussSprite.alpha = 1;
@@ -624,6 +633,17 @@ function onBeatHit(beat) {
     if (!playState) return;
     const currentSong = playState.songItem.id.toLowerCase();
 
+    // security.hxc beat animations!
+    if (currentSong.includes('49')) {
+        if (beat % 2 === 0 && playState.animatedProps['shit']) {
+            playState.animatedProps['shit'].gotoAndPlay(0);
+        }
+        if (beat % 1 === 0) {
+            if (playState.animatedProps['tawny']) playState.animatedProps['tawny'].gotoAndPlay(0);
+            if (playState.animatedProps['graypet']) playState.animatedProps['graypet'].gotoAndPlay(0);
+        }
+    }
+
     if (currentSong.includes('trot')) {
         playState.camZoom = playState.baseZoom + (beat % 2 === 0 ? 0.04 : 0.015);
     } else {
@@ -637,12 +657,6 @@ function onBeatHit(beat) {
         playState.gfDanceLeft = !playState.gfDanceLeft;
         playState.gf.playAnim(playState.gfDanceLeft ? 'idleleft' : 'idleright', true);
     }
-
-    playState.animatedProps.forEach(prop => {
-        if (beat % prop.bopInterval === 0) {
-            prop.sprite.gotoAndPlay(0);
-        }
-    });
 
     if (playState.dad && playState.dad.holdTimer <= 0) playState.dad.playAnim('idle');
     if (playState.bf && playState.bf.holdTimer <= 0) playState.bf.playAnim('idle');
