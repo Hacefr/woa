@@ -1,5 +1,5 @@
 // ============================================================================
-// CHARACTERS.JS - UNIVERSAL DUAL-ENGINE (GROUNDED STAGE ALIGNMENT)
+// CHARACTERS.JS - ZERO-TELEPORT DUAL-ENGINE (ROOT MATRIX SYNCHRONIZATION)
 // ============================================================================
 
 function extractMatrix(el) {
@@ -112,7 +112,7 @@ class SparrowCharacter {
 }
 
 // ----------------------------------------------------------------------------
-// 2. DYNAMIC TEXTURE ATLAS ENGINE
+// 2. DYNAMIC TEXTURE ATLAS ENGINE (WITH FLASH ROOT-MATRIX RESTORATION)
 // ----------------------------------------------------------------------------
 class DynamicAtlasCharacter {
     constructor(baseTexture, animJson, spritemapJson, charName = '', isPlayer = false, isGF = false) {
@@ -143,9 +143,10 @@ class DynamicAtlasCharacter {
             }
         }
 
-        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels
+        // 3. Scan Master Timeline (AN.TL.L) for Frame Labels & Root Matrices
         this.timelineAnims = {};
         this.masterLayers = (animJson.AN && animJson.AN.TL && animJson.AN.TL.L) ? animJson.AN.TL.L : [];
+        this.rootMatrices = {};
 
         for (const layer of this.masterLayers) {
             for (const fr of layer.FR || []) {
@@ -156,15 +157,23 @@ class DynamicAtlasCharacter {
                         duration: fr.DU || 1
                     };
                 }
+                for (const el of fr.E || []) {
+                    if (el.SI && el.SI.SN) {
+                        this.rootMatrices[el.SI.SN] = extractMatrix(el.SI);
+                    }
+                }
             }
         }
 
-        // 4. Scan Symbols for Direct Animation Names
+        // 4. Scan Symbols for Direct Animation Names (BF, Pico, GF)
         this.symbolAnims = {};
+        this.animMatrices = {};
+
         for (const symName of Object.keys(this.symbols)) {
             const lower = symName.toLowerCase();
             const assign = (key) => {
                 this.symbolAnims[key] = symName;
+                this.animMatrices[key] = this.rootMatrices[symName] || new PIXI.Matrix();
             };
 
             if (this.isGF) {
@@ -176,6 +185,13 @@ class DynamicAtlasCharacter {
                 if (lower.includes('down') && !lower.includes('miss') && !this.symbolAnims['down']) { assign('down'); assign('singdown'); }
                 if (lower.includes('up') && !lower.includes('miss') && !this.symbolAnims['up']) { assign('up'); assign('singup'); }
                 if (lower.includes('right') && !lower.includes('miss') && !this.symbolAnims['right']) { assign('right'); assign('singright'); }
+
+                if (lower.includes('miss')) {
+                    if (lower.includes('left')) assign('singleftmiss');
+                    if (lower.includes('down')) assign('singdownmiss');
+                    if (lower.includes('up')) assign('singupmiss');
+                    if (lower.includes('right')) assign('singrightmiss');
+                }
 
                 if (lower.includes('lock in')) assign('lock in');
                 if (lower.includes('cock')) assign('cock');
@@ -197,6 +213,7 @@ class DynamicAtlasCharacter {
     playAnim(animName, forced = false) {
         const clean = animName.toLowerCase().replace(/[^a-z0-9]/g, '');
         
+        // 1. Check Timeline Labels first
         let targetTimelineKey = Object.keys(this.timelineAnims).find(k => {
             const kc = k.replace(/[^a-z0-9]/g, '');
             return kc === clean || kc.startsWith(clean) || clean.startsWith(kc);
@@ -217,6 +234,7 @@ class DynamicAtlasCharacter {
             return;
         }
 
+        // 2. Check Symbol Names mode (BF, Pico, GF)
         let targetSymbolKey = Object.keys(this.symbolAnims).find(k => k === clean || clean.includes(k));
         if (!targetSymbolKey && animName.includes('idle')) targetSymbolKey = this.isGF ? 'idleleft' : 'idle';
 
@@ -283,19 +301,15 @@ class DynamicAtlasCharacter {
         if (this.mode === 'timeline' && this.activeAnimData) {
             const masterFrame = this.activeAnimData.startFrame + this.frame;
 
-            // Ground-level calibration: places feet on floor
             let groundOffsetX = 0;
-            let groundOffsetY = -450; // Standard 500px character anchor
+            let groundOffsetY = -480;
 
-            if (this.isDetective) {
+            if (this.isNoob) {
                 groundOffsetX = 0;
-                groundOffsetY = -480;
+                groundOffsetY = -460; // Perfectly lifts Noob49 so feet rest on the floor
             } else if (this.isHorse) {
                 groundOffsetX = 0;
-                groundOffsetY = -400;
-            } else if (this.isNoob) {
-                groundOffsetX = 0;
-                groundOffsetY = -220; // Noob sits low in foreground
+                groundOffsetY = -420;
             }
 
             for (let l = this.masterLayers.length - 1; l >= 0; l--) {
@@ -340,8 +354,11 @@ class DynamicAtlasCharacter {
         }
 
         // 2. SYMBOL MODE (Boyfriend, Pico, Girlfriend)
+        // CRITICAL FIX: Clones animation-specific Flash matrix to STOP BOYFRIEND TELEPORTING!
         if (this.mode === 'symbol' && this.activeSymbolName) {
-            const rootMat = new PIXI.Matrix();
+            const animMat = this.animMatrices[this.currentAnim] || this.rootMatrices[this.activeSymbolName] || new PIXI.Matrix();
+            const rootMat = animMat.clone();
+
             if (this.isPico) {
                 rootMat.translate(116, -180);
             } else if (this.isPlayer) {
@@ -481,7 +498,7 @@ async function loadCharacter(charName, isPlayer, isGF = false) {
         }
     }
 
-    // Sparrow Sheet Check (Fallback)
+    // Sparrow Sheet Check
     let pngEntry = null;
     let xmlEntry = null;
 
